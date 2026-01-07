@@ -139,9 +139,6 @@ dispatch file delete --path /tmp/old.log --hosts web
 ```bash
 # List all hosts and groups
 dispatch hosts
-
-# Open/create config file
-dispatch config
 ```
 
 ## Global Options

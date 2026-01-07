@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +56,6 @@ Examples:
 	rootCmd.AddCommand(execCmd())
 	rootCmd.AddCommand(fileCmd())
 	rootCmd.AddCommand(hostsCmd())
-	rootCmd.AddCommand(configCmd())
 	rootCmd.AddCommand(versionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
@@ -835,46 +833,6 @@ func hostsCmd() *cobra.Command {
 			fmt.Printf("Exec Config:\n")
 			fmt.Printf("  Parallel: %d\n", config.Exec.Parallel)
 			fmt.Printf("  Shell: %s\n", config.Exec.Shell)
-
-			return nil
-		},
-	}
-
-	return cmd
-}
-
-// configCmd opens configuration file
-func configCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "config",
-		Short: "Open or create config file",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var cfgPath string
-			if configPath == "" {
-				home, _ := os.UserHomeDir()
-				cfgPath = os.ExpandEnv(filepath.Join(home, ".dispatch", "config.toml"))
-			} else {
-				cfgPath = configPath
-			}
-
-			// Ensure directory exists
-			dir := filepath.Dir(cfgPath)
-			if err := os.MkdirAll(dir, 0755); err != nil {
-				return fmt.Errorf("failed to create config directory: %w", err)
-			}
-
-			// If file doesn't exist, create example
-			if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
-				fmt.Printf("Creating new config at %s\n", cfgPath)
-			}
-
-			// Open with editor
-			editor := os.Getenv("EDITOR")
-			if editor == "" {
-				editor = "vi"
-			}
-
-			fmt.Printf("Opening %s with %s...\n", cfgPath, editor)
 
 			return nil
 		},
