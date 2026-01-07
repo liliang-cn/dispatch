@@ -1,0 +1,67 @@
+# dispatch configuration example
+# Copy to ~/.dispatch/config.toml
+
+# SSH default settings
+[ssh]
+user = "root"              # Default user
+port = 22                  # Default port
+key_path = "~/.ssh/id_rsa" # Private key path
+timeout = "30s"            # Connection timeout
+
+# Execution settings
+[exec]
+parallel = 10              # Default parallel connections
+timeout = "5m"             # Command timeout
+shell = "/bin/bash"        # Remote shell
+
+# Logging
+[log]
+level = "info"             # Log level: debug, info, warn, error
+output = "stdout"          # Output: stdout, stderr, or file path
+no_color = false           # Disable colored output
+show_time = false          # Show timestamps
+
+# Host group definitions
+# You can define any number of groups
+
+[hosts.web]
+addresses = [
+    "192.168.1.10",
+    "192.168.1.11",
+    "192.168.1.12"
+]
+# Group-level SSH config override
+user = "www-data"
+
+[hosts.db]
+addresses = [
+    "192.168.1.20",
+    "192.168.1.21"
+]
+
+[hosts.cache]
+addresses = [
+    "192.168.1.30",
+    "192.168.1.31",
+    "192.168.1.32"
+]
+
+# all group contains all hosts
+[hosts.all]
+addresses = [
+    "192.168.1.10", "192.168.1.11", "192.168.1.12",
+    "192.168.1.20", "192.168.1.21",
+    "192.168.1.30", "192.168.1.31", "192.168.1.32"
+]
+
+# Per-host configuration override
+# Use hostname as section name
+[hosts."192.168.1.10"]
+user = "admin"
+port = 2222
+key_path = "~/.ssh/admin_key"
+
+# Another individual host configuration
+[hosts."db1.internal"]
+user = "dbadmin"
+key_path = "~/.ssh/db_key"

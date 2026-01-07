@@ -1,0 +1,197 @@
+syntax = "proto3";
+
+package dispatch;
+
+option go_package = "github.com/liliang-cn/dispatch/proto";
+
+// Dispatch 服务定义
+service Dispatch {
+  // 执行命令，流式返回输出
+  rpc Exec(ExecRequest) returns (stream ExecResponse);
+
+  // 上传文件到远程主机
+  rpc Copy(CopyRequest) returns (stream CopyResponse);
+
+  // 从远程主机下载文件
+  rpc Fetch(FetchRequest) returns (stream FetchResponse);
+
+  // 获取主机列表
+  rpc Hosts(HostsRequest) returns (HostsResponse);
+
+  // 获取任务状态（流式，用于持续监控）
+  rpc GetJob(JobRequest) returns (stream JobStatus);
+
+  // 列出所有任务
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+
+  // 取消正在运行的任务
+  rpc CancelJob(CancelJobRequest) returns (CancelJobResponse);
+}
+
+// ========== Exec 相关 ==========
+
+message ExecRequest {
+  repeated string hosts = 1;      // 主机列表或组名
+  string command = 2;              // 要执行的命令
+  int32 parallel = 3;              // 并发数，0 表示默认
+  int32 timeout_seconds = 4;       // 超时时间，0 表示默认
+  map<string, string> env = 5;     // 环境变量
+  string work_dir = 6;             // 工作目录
+  string input = 7;                // 标准输入
+}
+
+message ExecResponse {
+  string host = 1;                 // 主机地址
+  enum OutputType {
+    STDOUT = 0;
+    STDERR = 1;
+  }
+  OutputType type = 2;             // 输出类型
+  bytes data = 3;                  // 输出数据
+  int32 exit_code = 4;             // 退出码（结束时）
+  bool finished = 5;               // 是否完成
+  string error = 6;                // 错误信息
+}
+
+// ========== Copy 相关 ==========
+
+message CopyRequest {
+  repeated string hosts = 1;       // 主机列表或组名
+  string src = 2;                  // 源文件路径（本地）
+  string dest = 3;                 // 目标文件路径（远程）
+  int32 parallel = 4;              // 并发数
+  int32 mode = 5;                  // 文件权限（八进制）
+  string owner = 6;                // 文件所有者
+  string group = 7;                // 文件组
+  bool backup = 8;                 // 是否备份原文件
+}
+
+message CopyResponse {
+  string host = 1;                 // 主机地址
+  enum Status {
+    PENDING = 0;
+    COPYING = 1;
+    SUCCESS = 2;
+    FAILED = 3;
+  }
+  Status status = 2;               // 复制状态
+  int64 bytes_copied = 3;          // 已复制字节数
+  int64 total_bytes = 4;           // 总字节数
+  string error = 5;                // 错误信息
+  bool finished = 6;               // 是否完成
+}
+
+// ========== Fetch 相关 ==========
+
+message FetchRequest {
+  repeated string hosts = 1;       // 主机列表或组名
+  string src = 2;                  // 源文件路径（远程）
+  string dest = 3;                 // 目标目录（本地）
+  int32 parallel = 4;              // 并发数
+}
+
+message FetchResponse {
+  string host = 1;                 // 主机地址
+  enum Status {
+    PENDING = 0;
+    FETCHING = 1;
+    SUCCESS = 2;
+    FAILED = 3;
+  }
+  Status status = 2;               // 获取状态
+  int64 bytes_fetched = 3;         // 已获取字节数
+  int64 total_bytes = 4;           // 总字节数
+  string local_path = 5;           // 本地保存路径
+  bytes data = 6;                  // 文件数据（用于小文件）
+  string error = 7;                // 错误信息
+  bool finished = 8;               // 是否完成
+}
+
+// ========== Hosts 相关 ==========
+
+message HostsRequest {
+  bool all = 1;                    // 返回所有主机
+  string group = 2;                // 返回指定组的主机
+}
+
+message HostsResponse {
+  repeated HostInfo hosts = 1;
+  repeated GroupInfo groups = 2;
+}
+
+message HostInfo {
+  string address = 1;              // 主机地址
+  string group = 2;                // 所属组
+  string user = 3;                 // SSH 用户
+  int32 port = 4;                  // SSH 端口
+  bool online = 5;                 // 是否在线
+  string version = 6;              // 版本信息
+}
+
+message GroupInfo {
+  string name = 1;                 // 组名
+  repeated string hosts = 2;       // 主机列表
+  int32 count = 3;                 // 主机数量
+}
+
+// ========== Job 相关 ==========
+
+message JobRequest {
+  string job_id = 1;               // 任务 ID
+}
+
+message JobStatus {
+  string job_id = 1;               // 任务 ID
+  enum JobType {
+    EXEC = 0;
+    COPY = 1;
+    FETCH = 2;
+  }
+  JobType type = 2;                // 任务类型
+  enum Status {
+    PENDING = 0;
+    RUNNING = 1;
+    COMPLETED = 2;
+    FAILED = 3;
+    CANCELLED = 4;
+  }
+  Status status = 3;               // 任务状态
+  int32 total_hosts = 4;           // 总主机数
+  int32 completed_hosts = 5;       // 已完成主机数
+  int32 failed_hosts = 6;          // 失败主机数
+  int64 started_at = 7;            // 开始时间（Unix timestamp）
+  int64 completed_at = 8;          // 完成时间
+  repeated HostResult results = 9; // 各主机结果
+}
+
+message HostResult {
+  string host = 1;                 // 主机地址
+  bool success = 2;                // 是否成功
+  string error = 3;                // 错误信息
+  int64 duration_ms = 4;           // 执行耗时
+}
+
+message ListJobsRequest {
+  int32 limit = 1;                 // 限制返回数量
+  enum StatusFilter {
+    ALL = 0;
+    RUNNING = 1;
+    COMPLETED = 2;
+    FAILED = 3;
+  }
+  StatusFilter status = 2;         // 状态过滤
+}
+
+message ListJobsResponse {
+  repeated JobStatus jobs = 1;
+  int32 total = 2;                 // 总任务数
+}
+
+message CancelJobRequest {
+  string job_id = 1;               // 任务 ID
+}
+
+message CancelJobResponse {
+  bool success = 1;                // 是否成功
+  string message = 2;              // 消息
+}
