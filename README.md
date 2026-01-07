@@ -8,7 +8,8 @@ A simple SSH batch operation tool for executing commands and managing files acro
 
 - **Batch Command Execution** - Execute shell commands on multiple hosts simultaneously
 - **File Operations** - Send, fetch, update, and delete remote files
-- **Streaming Output** - Real-time output for long-running commands with `--stream`
+- **TUI Mode** - Visual table interface for multi-host operations
+- **Real-time Output** - Streaming output for long-running commands
 - **Host Key Verification** - SSH known_hosts support with auto-add mode
 - **Connection Reuse** - Efficient connection handling within operations
 - **Configuration Priority** - TOML config > ~/.ssh/config > /etc/hosts
@@ -95,14 +96,14 @@ This means if you set `user = "admin"` in your TOML file for a host, it will ove
 ### Execute Commands
 
 ```bash
-# Execute on host group
+# Execute on host group (uses TUI mode for multiple hosts)
 dispatch exec --hosts web -- "uptime"
 
 # Execute on multiple hosts
 dispatch exec --hosts "host1,host2" -- "systemctl status nginx"
 
-# Execute with real-time streaming output
-dispatch exec --hosts web --stream -- "apt-get install nginx"
+# Use text mode instead of TUI
+dispatch exec --hosts web --no-tui -- "apt-get install nginx"
 
 # Execute interactive commands (inject stdin)
 dispatch exec --hosts web --input "y\n" -- "./interactive_script.sh"
@@ -114,17 +115,20 @@ dispatch exec --hosts web -p 5 -t 60 -- "df -h"
 ### File Operations
 
 ```bash
-# Send file to multiple hosts
-dispatch file send --src ./nginx.conf --dest /etc/nginx/nginx.conf --hosts web
+# Send file to multiple hosts (uses TUI for progress)
+dispatch file send -s ./nginx.conf -d /etc/nginx/nginx.conf --hosts web
 
 # Send with custom permissions and backup existing file
 dispatch file send -s app.conf -d /etc/app/app.conf --hosts web --mode 644 --backup
 
+# Use text mode instead of TUI
+dispatch file send -s ./app.conf -d /etc/app/app.conf --hosts web --no-tui
+
 # Fetch file from multiple hosts
-dispatch file get --src /var/log/app.log --dest ./logs/ --hosts web
+dispatch file get -s /var/log/app.log -d ./logs/ --hosts web
 
 # Update file (only copies when changed)
-dispatch file update --src nginx.conf --dest /etc/nginx/nginx.conf --hosts web --backup
+dispatch file update -s nginx.conf -d /etc/nginx/nginx.conf --hosts web --backup
 
 # Delete remote file
 dispatch file delete --path /tmp/old.log --hosts web
@@ -148,7 +152,21 @@ dispatch config
 | `-p, --parallel` | Parallel connections (default: from config) |
 | `-t, --timeout` | Timeout in seconds (default: from config) |
 | `--log-level` | Log level: debug, info, warn, error |
-| `-s, --stream` | Stream output in real-time |
+| `--no-tui` | Disable TUI mode, use text output |
+
+### TUI Mode
+
+When operating on multiple hosts, dispatch automatically uses TUI (Terminal UI) mode:
+
+- **exec**: Shows real-time command execution status in a table
+- **file send/get/update**: Shows file transfer progress
+
+To disable TUI and use plain text output, add `--no-tui`:
+
+```bash
+dispatch exec --hosts web --no-tui -- "uptime"
+dispatch file send -s file.txt -d /tmp/file.txt --hosts web --no-tui
+```
 
 ## Authentication
 
@@ -282,7 +300,8 @@ dispatch/
 │   ├── inventory/         # TOML configuration & host management
 │   ├── logger/            # Colored logging
 │   ├── server/            # gRPC server implementation
-│   └── ssh/               # SSH client with host key verification
+│   ├── ssh/               # SSH client with host key verification
+│   └── tui/               # Terminal UI components
 ├── proto/
 │   └── dispatch.proto     # gRPC service definition
 └── config/
@@ -298,7 +317,7 @@ dispatch/
 | Execution | Modules | Direct commands |
 | Integration | CLI/Python | Go library/CLI/gRPC |
 | Best for | Full automation | Daily ops/Go integration |
-| Real-time output | Limited | Yes (with `--stream`) |
+| Real-time output | Limited | Yes (TUI mode) |
 | Host key verification | Yes | Yes (known_hosts) |
 
 ## License
