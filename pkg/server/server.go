@@ -161,9 +161,22 @@ func (s *Server) Exec(req *pb.ExecRequest, stream pb.Dispatch_ExecServer) error 
 		Parallel: parallel,
 		Timeout:  time.Duration(timeoutSecs) * time.Second,
 		Input:    req.Input,
+		Stream:   true,
+		StreamCallback: func(host, streamType string, data []byte) {
+			resp := &pb.ExecResponse{
+				Host: host,
+				Data: data,
+			}
+			if streamType == "stderr" {
+				resp.Type = pb.ExecResponse_STDERR
+			} else {
+				resp.Type = pb.ExecResponse_STDOUT
+			}
+			stream.Send(resp)
+		},
 	}
 
-	// 使用回调收集结果并发送到流
+	// 使用回调收集结果（仅用于状态更新和最终退出码）
 	callback := func(result *executor.ExecResult) {
 		job.mu.Lock()
 		defer job.mu.Unlock()
@@ -174,23 +187,7 @@ func (s *Server) Exec(req *pb.ExecRequest, stream pb.Dispatch_ExecServer) error 
 			Success:    result.ExitCode == 0,
 			Error:      errorMsg(result),
 			DurationMs: duration.Milliseconds(),
-			Output:     result.Output,
-		}
-
-		// 发送输出
-		if len(result.Output) > 0 {
-			stream.Send(&pb.ExecResponse{
-				Host: result.Host,
-				Type: pb.ExecResponse_STDOUT,
-				Data: result.Output,
-			})
-		}
-		if len(result.Error) > 0 {
-			stream.Send(&pb.ExecResponse{
-				Host: result.Host,
-				Type: pb.ExecResponse_STDERR,
-				Data: result.Error,
-			})
+			// Output is explicitly NOT saved here to save memory, as it was already streamed
 		}
 
 		// 发送完成信号

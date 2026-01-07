@@ -45,8 +45,10 @@ type ExecConfig struct {
 
 // HostGroup represents a host group
 type HostGroup struct {
-	Addresses []string          `toml:"addresses"`
-	Overrides map[string]string `toml:"-"` // Runtime overrides, not from TOML
+	Addresses []string `toml:"addresses"`
+	User      string   `toml:"user"`
+	Port      int      `toml:"port"`
+	KeyPath   string   `toml:"key_path"`
 }
 
 // Host represents complete configuration for a single host
@@ -201,16 +203,16 @@ func (inv *Inventory) buildHost(address string, group string) Host {
 
 	// Check host-level overrides (highest priority)
 	if hostConfig, ok := inv.config.Hosts[address]; ok {
-		if user, ok := hostConfig.Overrides["user"]; ok {
-			host.User = user
+		if hostConfig.User != "" {
+			host.User = hostConfig.User
 			host.UserSet = true
 		}
-		if portStr, ok := hostConfig.Overrides["port"]; ok {
-			fmt.Sscanf(portStr, "%d", &host.Port)
+		if hostConfig.Port != 0 {
+			host.Port = hostConfig.Port
 			host.PortSet = true
 		}
-		if keyPath, ok := hostConfig.Overrides["key_path"]; ok {
-			host.KeyPath = keyPath
+		if hostConfig.KeyPath != "" {
+			host.KeyPath = hostConfig.KeyPath
 			host.KeyPathSet = true
 		}
 	}
@@ -218,23 +220,17 @@ func (inv *Inventory) buildHost(address string, group string) Host {
 	// Check group-level overrides (only applied if not set at host level)
 	if group != "" {
 		if groupConfig, ok := inv.config.Hosts[group]; ok {
-			if !host.UserSet {
-				if user, ok := groupConfig.Overrides["user"]; ok {
-					host.User = user
-					host.UserSet = true
-				}
+			if !host.UserSet && groupConfig.User != "" {
+				host.User = groupConfig.User
+				host.UserSet = true
 			}
-			if !host.PortSet {
-				if portStr, ok := groupConfig.Overrides["port"]; ok {
-					fmt.Sscanf(portStr, "%d", &host.Port)
-					host.PortSet = true
-				}
+			if !host.PortSet && groupConfig.Port != 0 {
+				host.Port = groupConfig.Port
+				host.PortSet = true
 			}
-			if !host.KeyPathSet {
-				if keyPath, ok := groupConfig.Overrides["key_path"]; ok {
-					host.KeyPath = keyPath
-					host.KeyPathSet = true
-				}
+			if !host.KeyPathSet && groupConfig.KeyPath != "" {
+				host.KeyPath = groupConfig.KeyPath
+				host.KeyPathSet = true
 			}
 		}
 	}

@@ -28,6 +28,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,13 +42,22 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+// SSHClient interface abstracts the SSH client interactions
+type SSHClient interface {
+	Connect(spec dispatchssh.HostSpec) (*ssh.Client, error)
+	Exec(spec dispatchssh.HostSpec, cmd string, input string, timeout time.Duration) (*dispatchssh.ExecResult, error)
+	ExecStream(spec dispatchssh.HostSpec, cmd string, input string, timeout time.Duration) (io.ReadCloser, io.ReadCloser, error)
+	Copy(spec dispatchssh.HostSpec, src, dest string, mode os.FileMode) error
+	Fetch(spec dispatchssh.HostSpec, src, dest string) error
+}
+
 // Executor handles parallel execution
 type Executor struct {
 	inv        *inventory.Inventory
 	logger     *logger.Logger
 	connCache  map[string]*clientConn // Cache for connections within a single operation
 	connMu     sync.Mutex             // Protects connCache
-	baseClient *dispatchssh.Client     // Base SSH client for creating connections
+	baseClient SSHClient              // Base SSH client for creating connections
 }
 
 // clientConn wraps an SSH client with metadata for connection reuse.
@@ -94,6 +104,11 @@ func (e *Executor) getSSHClientOptions() []dispatchssh.ClientOption {
 	return opts
 }
 
+// SetBaseClient sets the base SSH client (useful for testing)
+func (e *Executor) SetBaseClient(client SSHClient) {
+	e.baseClient = client
+}
+
 // beginOperation initializes the connection cache for a new operation.
 func (e *Executor) beginOperation() error {
 	e.connMu.Lock()
@@ -101,12 +116,14 @@ func (e *Executor) beginOperation() error {
 
 	e.connCache = make(map[string]*clientConn)
 
-	// Create base SSH client
-	client, err := dispatchssh.NewClient(e.inv.GetConfig().SSH.KeyPath, e.getSSHClientOptions()...)
-	if err != nil {
-		return fmt.Errorf("failed to create SSH client: %w", err)
+	// Create base SSH client if not already set
+	if e.baseClient == nil {
+		client, err := dispatchssh.NewClient(e.inv.GetConfig().SSH.KeyPath, e.getSSHClientOptions()...)
+		if err != nil {
+			return fmt.Errorf("failed to create SSH client: %w", err)
+		}
+		e.baseClient = client
 	}
-	e.baseClient = client
 	return nil
 }
 
@@ -273,14 +290,15 @@ func (e *Executor) fetchFile(sshClient *ssh.Client, src, dest string) (int64, er
 
 // ExecRequest command execution request
 type ExecRequest struct {
-	Hosts    []string
-	Cmd      string
-	Input    string // Standard input to pass to the command
-	Env      map[string]string
-	Dir      string
-	Parallel int
-	Timeout  time.Duration
-	Stream   bool // Whether to use streaming output
+	Hosts          []string
+	Cmd            string
+	Input          string // Standard input to pass to the command
+	Env            map[string]string
+	Dir            string
+	Parallel       int
+	Timeout        time.Duration
+	Stream         bool                                            // Whether to use streaming output
+	StreamCallback func(host, streamType string, data []byte) // Callback for streaming output
 }
 
 // ExecResult execution result
@@ -432,7 +450,13 @@ func (e *Executor) ExecStreamWithCallback(ctx context.Context, req *ExecRequest,
 		if len(data) == 0 {
 			return
 		}
-		// Print output in real-time
+		
+		if req.StreamCallback != nil {
+			req.StreamCallback(host, typ, data)
+			return
+		}
+
+		// Print output in real-time (default behavior)
 		if typ == "error" {
 			fmt.Printf("[%s] %s", host, data)
 		} else if typ == "stderr" {

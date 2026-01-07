@@ -18,6 +18,8 @@ import (
 )
 
 var (
+	Version = "dev" // Set at build time
+
 	port      int
 	configPath string
 )
@@ -26,14 +28,32 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "dispatch-server",
 		Short: "dispatch gRPC server",
+		Version: Version,
 		RunE:  runServer,
 	}
 
 	rootCmd.Flags().IntVarP(&port, "port", "p", 50051, "gRPC server port")
 	rootCmd.Flags().StringVarP(&configPath, "config", "c", "", "Config file path")
 
+	// Set version template
+	rootCmd.SetVersionTemplate(`{{with .Name}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
+`)
+
+	rootCmd.AddCommand(versionCmd())
+
 	if err := rootCmd.Execute(); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// versionCmd returns version command
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version number of dispatch-server",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("dispatch-server version %s\n", Version)
+		},
 	}
 }
 

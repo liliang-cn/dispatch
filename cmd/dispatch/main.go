@@ -14,6 +14,8 @@ import (
 )
 
 var (
+	Version = "dev" // Set at build time
+
 	configPath string
 	parallel   int
 	timeout    int
@@ -25,6 +27,7 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "dispatch",
 		Short: "A simple SSH batch operation tool",
+		Version: Version,
 		Long: `dispatch - Execute commands on multiple servers via SSH
 
 Examples:
@@ -41,11 +44,16 @@ Examples:
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error (default: info)")
 	rootCmd.PersistentFlags().BoolVarP(&streamMode, "stream", "s", false, "Stream output in real-time")
 
+	// Set version template
+	rootCmd.SetVersionTemplate(`{{with .Name}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
+`)
+
 	// Add subcommands
 	rootCmd.AddCommand(execCmd())
 	rootCmd.AddCommand(fileCmd())
 	rootCmd.AddCommand(hostsCmd())
 	rootCmd.AddCommand(configCmd())
+	rootCmd.AddCommand(versionCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -478,4 +486,15 @@ func configCmd() *cobra.Command {
 	}
 
 	return cmd
+}
+
+// versionCmd returns version command
+func versionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version number of dispatch",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("dispatch version %s\n", Version)
+		},
+	}
 }

@@ -122,6 +122,10 @@ func (d *Dispatch) Exec(ctx context.Context, hosts []string, cmd string, opts ..
 	if options.input != "" {
 		req.Input = options.input
 	}
+	if options.streamCallback != nil {
+		req.StreamCallback = options.streamCallback
+		req.Stream = true
+	}
 
 	result := &ExecResult{
 		Hosts:    make(map[string]*HostResult),
@@ -162,6 +166,7 @@ type execOptions struct {
 	env      map[string]string
 	dir      string
 	input    string
+	streamCallback func(host, streamType string, data []byte)
 }
 
 // WithParallel 设置并发数
@@ -175,6 +180,13 @@ func WithParallel(n int) ExecOption {
 func WithInput(input string) ExecOption {
 	return func(o *execOptions) {
 		o.input = input
+	}
+}
+
+// WithStreamCallback 设置流式输出回调
+func WithStreamCallback(callback func(host, streamType string, data []byte)) ExecOption {
+	return func(o *execOptions) {
+		o.streamCallback = callback
 	}
 }
 

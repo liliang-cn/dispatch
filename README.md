@@ -104,6 +104,9 @@ dispatch exec --hosts "host1,host2" -- "systemctl status nginx"
 # Execute with real-time streaming output
 dispatch exec --hosts web --stream -- "apt-get install nginx"
 
+# Execute interactive commands (inject stdin)
+dispatch exec --hosts web --input "y\n" -- "./interactive_script.sh"
+
 # Set parallelism and timeout
 dispatch exec --hosts web -p 5 -t 60 -- "df -h"
 ```
@@ -114,14 +117,14 @@ dispatch exec --hosts web -p 5 -t 60 -- "df -h"
 # Send file to multiple hosts
 dispatch file send --src ./nginx.conf --dest /etc/nginx/nginx.conf --hosts web
 
-# Send with custom permissions
-dispatch file send -s app.conf -d /etc/app/app.conf --hosts web --mode 644
+# Send with custom permissions and backup existing file
+dispatch file send -s app.conf -d /etc/app/app.conf --hosts web --mode 644 --backup
 
 # Fetch file from multiple hosts
 dispatch file get --src /var/log/app.log --dest ./logs/ --hosts web
 
 # Update file (only copies when changed)
-dispatch file update --src nginx.conf --dest /etc/nginx/nginx.conf --hosts web
+dispatch file update --src nginx.conf --dest /etc/nginx/nginx.conf --hosts web --backup
 
 # Delete remote file
 dispatch file delete --path /tmp/old.log --hosts web
@@ -209,6 +212,11 @@ func main() {
         dispatch.WithTimeout(30*time.Second),
     )
 
+    // Execute interactive command with input
+    client.Exec(ctx, []string{"web"}, "./script.sh",
+        dispatch.WithInput("y\n"),
+    )
+
     for _, r := range result.Hosts {
         if r.Success {
             fmt.Printf("[%s] %s\n", r.Host, r.Output)
@@ -220,17 +228,20 @@ func main() {
 ### File Operations
 
 ```go
-// Send file to multiple hosts
+// Send file to multiple hosts with backup
 copyResult, _ := client.Copy(ctx, []string{"web"}, "./app.conf", "/etc/app/app.conf",
     dispatch.WithCopyMode(0644),
     dispatch.WithParallel(5),
+    dispatch.WithBackup(true),
 )
 
 // Fetch file from multiple hosts
 fetchResult, _ := client.Fetch(ctx, []string{"web"}, "/var/log/app.log", "./logs/")
 
-// Update file (only copy when changed)
-updateResult, _ := client.Update(ctx, []string{"web"}, "./app.conf", "/etc/app/app.conf")
+// Update file (only copy when changed) with backup
+updateResult, _ := client.Update(ctx, []string{"web"}, "./app.conf", "/etc/app/app.conf",
+    dispatch.WithUpdateBackup(true),
+)
 ```
 
 ## gRPC Server
