@@ -252,7 +252,7 @@ var hostsCacheLoaded bool
 func loadHostsFile() map[string]string {
 	m := make(map[string]string)
 
-	f, err := os.Open("/etc/hosts")
+	f, err := os.Open(hostsFilePath)
 	if err != nil {
 		return m
 	}
