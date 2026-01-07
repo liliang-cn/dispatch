@@ -247,6 +247,14 @@ func (s *Server) Copy(req *pb.CopyRequest, stream pb.Dispatch_CopyServer) error 
 		Parallel: parallel,
 		Mode:     mode,
 		Backup:   req.Backup,
+		ProgressCallback: func(info executor.ProgressInfo) {
+			stream.Send(&pb.CopyResponse{
+				Host:        info.Host,
+				Status:      pb.CopyResponse_COPYING,
+				BytesCopied: info.Current,
+				TotalBytes:  info.Total,
+			})
+		},
 	}
 
 	callback := func(result *executor.CopyResult) {
@@ -326,6 +334,14 @@ func (s *Server) Fetch(req *pb.FetchRequest, stream pb.Dispatch_FetchServer) err
 		Src:      src,
 		Dest:     dest,
 		Parallel: parallel,
+		ProgressCallback: func(info executor.ProgressInfo) {
+			stream.Send(&pb.FetchResponse{
+				Host:         info.Host,
+				Status:       pb.FetchResponse_FETCHING,
+				BytesFetched: info.Current,
+				TotalBytes:   info.Total,
+			})
+		},
 	}
 
 	callback := func(result *executor.FetchResult) {

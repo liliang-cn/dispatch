@@ -95,6 +95,14 @@ func NewWithInventory(inv *inventory.Inventory) *Dispatch {
 	}
 }
 
+// ProgressInfo represents file transfer progress.
+type ProgressInfo struct {
+	Host    string
+	Action  string // "upload" or "download"
+	Current int64
+	Total   int64
+}
+
 // Exec 在指定主机上执行命令
 func (d *Dispatch) Exec(ctx context.Context, hosts []string, cmd string, opts ...ExecOption) (*ExecResult, error) {
 	options := &execOptions{}
@@ -285,6 +293,17 @@ func (d *Dispatch) Copy(ctx context.Context, hosts []string, src, dest string, o
 		req.Mode = options.mode
 	}
 	req.Backup = options.backup
+	
+	if options.progressCallback != nil {
+		req.ProgressCallback = func(info executor.ProgressInfo) {
+			options.progressCallback(ProgressInfo{
+				Host:    info.Host,
+				Action:  info.Action,
+				Current: info.Current,
+				Total:   info.Total,
+			})
+		}
+	}
 
 	result := &CopyResult{
 		Hosts:     make(map[string]*CopyHostResult),
@@ -322,6 +341,7 @@ type copyOptions struct {
 	parallel int
 	mode     int
 	backup   bool
+	progressCallback func(info ProgressInfo)
 }
 
 // WithCopyMode 设置文件权限
@@ -335,6 +355,13 @@ func WithCopyMode(mode int) CopyOption {
 func WithBackup(backup bool) CopyOption {
 	return func(o *copyOptions) {
 		o.backup = backup
+	}
+}
+
+// WithCopyProgress 设置复制进度回调
+func WithCopyProgress(callback func(info ProgressInfo)) CopyOption {
+	return func(o *copyOptions) {
+		o.progressCallback = callback
 	}
 }
 
@@ -387,6 +414,17 @@ func (d *Dispatch) Update(ctx context.Context, hosts []string, src, dest string,
 	}
 	req.Backup = options.backup
 
+	if options.progressCallback != nil {
+		req.ProgressCallback = func(info executor.ProgressInfo) {
+			options.progressCallback(ProgressInfo{
+				Host:    info.Host,
+				Action:  info.Action,
+				Current: info.Current,
+				Total:   info.Total,
+			})
+		}
+	}
+
 	result := &UpdateResult{
 		Hosts:     make(map[string]*UpdateHostResult),
 		StartTime: time.Now(),
@@ -424,6 +462,7 @@ type updateOptions struct {
 	parallel int
 	mode     int
 	backup   bool
+	progressCallback func(info ProgressInfo)
 }
 
 // WithUpdateMode 设置文件权限
@@ -444,6 +483,13 @@ func WithUpdateBackup(backup bool) UpdateOption {
 func WithUpdateParallel(n int) UpdateOption {
 	return func(o *updateOptions) {
 		o.parallel = n
+	}
+}
+
+// WithUpdateProgress 设置更新进度回调
+func WithUpdateProgress(callback func(info ProgressInfo)) UpdateOption {
+	return func(o *updateOptions) {
+		o.progressCallback = callback
 	}
 }
 
@@ -503,6 +549,17 @@ func (d *Dispatch) Fetch(ctx context.Context, hosts []string, src, dest string, 
 		req.Parallel = options.parallel
 	}
 
+	if options.progressCallback != nil {
+		req.ProgressCallback = func(info executor.ProgressInfo) {
+			options.progressCallback(ProgressInfo{
+				Host:    info.Host,
+				Action:  info.Action,
+				Current: info.Current,
+				Total:   info.Total,
+			})
+		}
+	}
+
 	result := &FetchResult{
 		Hosts:     make(map[string]*FetchHostResult),
 		StartTime: time.Now(),
@@ -538,6 +595,14 @@ type FetchOption func(*fetchOptions)
 
 type fetchOptions struct {
 	parallel int
+	progressCallback func(info ProgressInfo)
+}
+
+// WithFetchProgress 设置下载进度回调
+func WithFetchProgress(callback func(info ProgressInfo)) FetchOption {
+	return func(o *fetchOptions) {
+		o.progressCallback = callback
+	}
 }
 
 // FetchResult contains the results of fetching a file from multiple hosts.

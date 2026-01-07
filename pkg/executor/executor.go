@@ -146,18 +146,28 @@ func (e *Executor) getConnection(spec dispatchssh.HostSpec) (*ssh.Client, error)
 	key := fmt.Sprintf("%s@%s:%d", spec.User, spec.Address, spec.Port)
 
 	e.connMu.Lock()
-	defer e.connMu.Unlock()
-
 	// Check if we have a cached connection
 	if conn, ok := e.connCache[key]; ok {
 		conn.refCount++
+		e.connMu.Unlock()
 		return conn.client, nil
 	}
+	e.connMu.Unlock()
 
-	// Create new connection
+	// Create new connection (slow operation, done without lock)
 	client, err := e.baseClient.Connect(spec)
 	if err != nil {
 		return nil, err
+	}
+
+	e.connMu.Lock()
+	defer e.connMu.Unlock()
+
+	// Double-check cache in case another goroutine connected while we were dialing
+	if conn, ok := e.connCache[key]; ok {
+		client.Close() // Close the duplicate connection
+		conn.refCount++
+		return conn.client, nil
 	}
 
 	// Cache the connection
@@ -225,26 +235,46 @@ func (e *Executor) parseExecResult(stdout, stderr string, err error) (*dispatchs
 }
 
 // copyFile copies a file to the remote host using an existing SSH connection.
-func (e *Executor) copyFile(sshClient *ssh.Client, src, dest string, mode os.FileMode) error {
+func (e *Executor) copyFile(sshClient *ssh.Client, src, dest string, mode os.FileMode, progress func(int64)) error {
 	session, err := sshClient.NewSession()
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
 	defer session.Close()
 
-	// Read source file
-	content, err := os.ReadFile(src)
+	// Get source file info
+	fi, err := os.Stat(src)
 	if err != nil {
-		return fmt.Errorf("failed to read source file: %w", err)
+		return fmt.Errorf("failed to stat source file: %w", err)
+	}
+	size := fi.Size()
+
+	// Open source file
+	f, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer f.Close()
+
+	// Get stdin pipe BEFORE starting the command
+	w, err := session.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("failed to get stdin pipe: %w", err)
 	}
 
-	// Use scp protocol
+	// Use scp protocol in a goroutine
 	go func() {
-		w, _ := session.StdinPipe()
 		defer w.Close()
 
-		fmt.Fprintf(w, "C%04o %d %s\n", mode, len(content), filepath.Base(dest))
-		w.Write(content)
+		fmt.Fprintf(w, "C%04o %d %s\n", mode, size, filepath.Base(dest))
+		
+		// Create a writer that reports progress
+		pw := &progressWriter{
+			Writer:   w,
+			onWrite: progress,
+		}
+		
+		io.Copy(pw, f)
 		fmt.Fprint(w, "\x00")
 	}()
 
@@ -262,30 +292,60 @@ func (e *Executor) copyFile(sshClient *ssh.Client, src, dest string, mode os.Fil
 	return nil
 }
 
+type progressWriter struct {
+	io.Writer
+	onWrite func(int64)
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n, err := pw.Writer.Write(p)
+	if n > 0 && pw.onWrite != nil {
+		pw.onWrite(int64(n))
+	}
+	return n, err
+}
+
 // fetchFile downloads a file from the remote host using an existing SSH connection.
-func (e *Executor) fetchFile(sshClient *ssh.Client, src, dest string) (int64, error) {
+func (e *Executor) fetchFile(sshClient *ssh.Client, src, dest string, progress func(int64)) (int64, error) {
 	session, err := sshClient.NewSession()
 	if err != nil {
 		return 0, fmt.Errorf("failed to create session: %w", err)
 	}
 	defer session.Close()
 
-	// Prepare to receive file content
-	var content strings.Builder
-	session.Stdout = &content
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		return 0, err
+	}
+
+	// Create local file
+	f, err := os.Create(dest)
+	if err != nil {
+		return 0, fmt.Errorf("failed to create file: %w", err)
+	}
+	defer f.Close()
 
 	// Use cat command to read file (simple and reliable)
-	if err := session.Run(fmt.Sprintf("cat %s", src)); err != nil {
-		return 0, fmt.Errorf("failed to fetch file: %w", err)
+	if err := session.Start(fmt.Sprintf("cat %s", src)); err != nil {
+		return 0, fmt.Errorf("failed to start fetch: %w", err)
 	}
 
-	// Write to local file
-	data := content.String()
-	if err := os.WriteFile(dest, []byte(data), 0644); err != nil {
-		return 0, fmt.Errorf("failed to write file: %w", err)
+	// Create a writer that reports progress
+	pw := &progressWriter{
+		Writer:   f,
+		onWrite: progress,
 	}
 
-	return int64(len(data)), nil
+	n, err := io.Copy(pw, stdout)
+	if err != nil {
+		return n, fmt.Errorf("failed to download file: %w", err)
+	}
+
+	if err := session.Wait(); err != nil {
+		return n, fmt.Errorf("fetch failed: %w", err)
+	}
+
+	return n, nil
 }
 
 // ExecRequest command execution request
@@ -660,14 +720,23 @@ func (e *Executor) ExecStream(ctx context.Context, req *ExecRequest, outputCallb
 	return nil
 }
 
+// ProgressInfo represents file transfer progress
+type ProgressInfo struct {
+	Host    string
+	Action  string // "upload" or "download"
+	Current int64
+	Total   int64
+}
+
 // CopyRequest copy file request
 type CopyRequest struct {
-	Hosts    []string
-	Src      string
-	Dest     string
-	Mode     int // File permissions
-	Parallel int
-	Backup   bool // Whether to backup existing file
+	Hosts            []string
+	Src              string
+	Dest             string
+	Mode             int // File permissions
+	Parallel         int
+	Backup           bool // Whether to backup existing file
+	ProgressCallback func(info ProgressInfo)
 }
 
 // CopyResult copy result
@@ -753,7 +822,20 @@ func (e *Executor) Copy(ctx context.Context, req *CopyRequest, callback func(*Co
 				e.execOnConn(conn, backupCmd, "", 10*time.Second)
 			}
 
-			err = e.copyFile(conn, req.Src, req.Dest, os.FileMode(req.Mode))
+			var currentBytes int64
+			progressFunc := func(n int64) {
+				if req.ProgressCallback != nil {
+					atomic.AddInt64(&currentBytes, n)
+					req.ProgressCallback(ProgressInfo{
+						Host:    h.Address,
+						Action:  "upload",
+						Current: atomic.LoadInt64(&currentBytes),
+						Total:   srcSize,
+					})
+				}
+			}
+
+			err = e.copyFile(conn, req.Src, req.Dest, os.FileMode(req.Mode), progressFunc)
 			result.EndTime = time.Now()
 
 			if err != nil {
@@ -772,10 +854,11 @@ func (e *Executor) Copy(ctx context.Context, req *CopyRequest, callback func(*Co
 
 // FetchRequest download file request
 type FetchRequest struct {
-	Hosts    []string
-	Src      string
-	Dest     string
-	Parallel int
+	Hosts            []string
+	Src              string
+	Dest             string
+	Parallel         int
+	ProgressCallback func(info ProgressInfo)
 }
 
 // FetchResult download result
@@ -797,6 +880,13 @@ func (e *Executor) Fetch(ctx context.Context, req *FetchRequest, callback func(*
 
 	if req.Parallel <= 0 {
 		req.Parallel = e.inv.GetDefaultParallel()
+	}
+
+	// Ensure local destination directory exists
+	if err := os.MkdirAll(req.Dest, 0755); err != nil && !os.IsExist(err) {
+		if len(hosts) > 1 {
+			return fmt.Errorf("failed to create destination directory: %w", err)
+		}
 	}
 
 	// Initialize connection cache for this operation
@@ -853,13 +943,34 @@ func (e *Executor) Fetch(ctx context.Context, req *FetchRequest, callback func(*
 				return
 			}
 
-			bytesFetched, err := e.fetchFile(conn, req.Src, localPath)
+			// Get remote file size first for progress reporting
+			var totalSize int64
+			sizeCmd := fmt.Sprintf("stat -c %%s %s 2>/dev/null || wc -c < %s", req.Src, req.Src)
+			sizeRes, err := e.execOnConn(conn, sizeCmd, "", 10*time.Second)
+			if err == nil && sizeRes.ExitCode == 0 {
+				fmt.Sscanf(strings.TrimSpace(string(sizeRes.Output)), "%d", &totalSize)
+			}
+
+			var currentBytes int64
+			progressFunc := func(n int64) {
+				if req.ProgressCallback != nil {
+					atomic.AddInt64(&currentBytes, n)
+					req.ProgressCallback(ProgressInfo{
+						Host:    h.Address,
+						Action:  "download",
+						Current: atomic.LoadInt64(&currentBytes),
+						Total:   totalSize,
+					})
+				}
+			}
+
+			n, err := e.fetchFile(conn, req.Src, localPath, progressFunc)
 			result.EndTime = time.Now()
 
 			if err != nil {
 				result.Err = err
 			} else {
-				result.BytesFetched = bytesFetched
+				result.BytesFetched = n
 			}
 
 			callback(result)
@@ -965,12 +1076,13 @@ func (e *Executor) Delete(ctx context.Context, req *DeleteRequest, callback func
 
 // UpdateRequest update file request
 type UpdateRequest struct {
-	Hosts    []string
-	Src      string // Source file path (local)
-	Dest     string // Target file path (remote)
-	Mode     int    // File permissions
-	Parallel int
-	Backup   bool // Whether to backup existing file
+	Hosts            []string
+	Src              string // Source file path (local)
+	Dest             string // Target file path (remote)
+	Mode             int    // File permissions
+	Parallel         int
+	Backup           bool // Whether to backup existing file
+	ProgressCallback func(info ProgressInfo)
 }
 
 // UpdateResult update result
@@ -1079,7 +1191,20 @@ func (e *Executor) Update(ctx context.Context, req *UpdateRequest, callback func
 					e.execOnConn(conn, backupCmd, "", 10*time.Second)
 				}
 
-				err = e.copyFile(conn, req.Src, req.Dest, os.FileMode(req.Mode))
+				var currentBytes int64
+				progressFunc := func(n int64) {
+					if req.ProgressCallback != nil {
+						atomic.AddInt64(&currentBytes, n)
+						req.ProgressCallback(ProgressInfo{
+							Host:    h.Address,
+							Action:  "upload",
+							Current: atomic.LoadInt64(&currentBytes),
+							Total:   int64(len(localContent)),
+						})
+					}
+				}
+
+				err = e.copyFile(conn, req.Src, req.Dest, os.FileMode(req.Mode), progressFunc)
 				result.EndTime = time.Now()
 
 				if err != nil {

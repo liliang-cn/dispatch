@@ -798,7 +798,7 @@ func getAgentSigner() (ssh.Signer, error) {
 		return nil, fmt.Errorf("SSH_AUTH_SOCK not set")
 	}
 
-	conn, err := net.Dial("unix", socket)
+	conn, err := net.DialTimeout("unix", socket, 500*time.Millisecond)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to ssh-agent: %w", err)
 	}
