@@ -4,4 +4,4 @@ package ssh
 
 import "os"
 
-var hostsFilePath = os.ExpandEnv("${SystemRoot}\System32\drivers\etc\hosts")
+var hostsFilePath = os.ExpandEnv(`${SystemRoot}\System32\drivers\etc\hosts`)
