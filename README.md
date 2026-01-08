@@ -132,6 +132,15 @@ dispatch file update -s nginx.conf -d /etc/nginx/nginx.conf --hosts web --backup
 
 # Delete remote file
 dispatch file delete --path /tmp/old.log --hosts web
+
+# Check file stats (size, mode, owner, etc.) - uses TUI mode
+dispatch file stats --path /etc/nginx/nginx.conf --hosts web
+
+# Read text file content from remote hosts
+dispatch file read --path /var/log/app.log --hosts web
+
+# Read with offset and limit (for pagination)
+dispatch file read --path /var/log/app.log --hosts web --offset 1000 --limit 500
 ```
 
 ### Other Commands
@@ -157,12 +166,14 @@ When operating on multiple hosts, dispatch automatically uses TUI (Terminal UI) 
 
 - **exec**: Shows real-time command execution status in a table
 - **file send/get/update**: Shows file transfer progress
+- **file stats**: Shows file information (size, mode, owner, etc.) in a table
 
 To disable TUI and use plain text output, add `--no-tui`:
 
 ```bash
 dispatch exec --hosts web --no-tui -- "uptime"
 dispatch file send -s file.txt -d /tmp/file.txt --hosts web --no-tui
+dispatch file stats --path /etc/hosts --hosts web --no-tui
 ```
 
 ## Authentication
@@ -257,6 +268,18 @@ fetchResult, _ := client.Fetch(ctx, []string{"web"}, "/var/log/app.log", "./logs
 updateResult, _ := client.Update(ctx, []string{"web"}, "./app.conf", "/etc/app/app.conf",
     dispatch.WithUpdateBackup(true),
 )
+
+// Get file stats (size, mode, owner, group, modtime)
+statsResult, _ := client.Stats(ctx, []string{"web"}, "/etc/nginx/nginx.conf",
+    dispatch.WithStatsParallel(5),
+)
+
+// Read text file content from remote hosts
+readResult, _ := client.Read(ctx, []string{"web"}, "/var/log/app.log",
+    dispatch.WithReadParallel(5),
+    dispatch.WithReadOffset(1000),  // Optional: start reading from byte offset
+    dispatch.WithReadLimit(500),    // Optional: limit bytes to read
+)
 ```
 
 ## gRPC Server
@@ -279,6 +302,8 @@ make build
 | `Exec` | Stream command execution results |
 | `Copy` | Stream file copy progress |
 | `Fetch` | Stream file fetch results |
+| `Stats` | Get file stats (size, mode, owner, etc.) |
+| `Read` | Read text file content from remote hosts |
 | `Hosts` | List configured hosts and groups |
 | `ListJobs` | List all jobs with status |
 | `GetJob` | Get job details by ID |
