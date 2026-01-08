@@ -760,7 +760,7 @@ func fileDeleteCmd() *cobra.Command {
 		Use:   "delete [OPTIONS]",
 		Short: "Delete file on multiple hosts",
 		Example: `  dispatch file delete --path /tmp/old.log --hosts web
-  dispatch file delete -p /var/log/app.log --hosts "host1,host2"`,
+  dispatch file delete --path /var/log/app.log --hosts "host1,host2"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if path == "" {
 				return fmt.Errorf("--path is required")
@@ -797,7 +797,6 @@ func fileDeleteCmd() *cobra.Command {
 
 	cmd.Flags().StringSliceVar(&hosts, "hosts", nil, "Host group or comma-separated host list (required)")
 	cmd.Flags().StringVar(&path, "path", "", "Path on remote to delete (required)")
-	cmd.Flags().StringVar(&path, "p", "", "Short for path")
 
 	return cmd
 }
@@ -811,7 +810,7 @@ func fileStatsCmd() *cobra.Command {
 		Use:   "stats [OPTIONS]",
 		Short: "Check file stats on remote hosts",
 		Example: `  dispatch file stats --path /etc/nginx/nginx.conf --hosts web
-  dispatch file stats -p /var/log/app.log --hosts "host1,host2"`,
+  dispatch file stats --path /var/log/app.log --hosts "host1,host2"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if path == "" {
 				return fmt.Errorf("--path is required")
@@ -867,7 +866,7 @@ func fileStatsCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringSliceVar(&hosts, "hosts", nil, "Host group or comma-separated host list (required)")
-	cmd.Flags().StringVarP(&path, "path", "p", "", "File path to check (required)")
+	cmd.Flags().StringVar(&path, "path", "", "File path to check (required)")
 
 	return cmd
 }
@@ -883,7 +882,7 @@ func fileReadCmd() *cobra.Command {
 		Use:   "read [OPTIONS]",
 		Short: "Read file content from remote hosts",
 		Example: `  dispatch file read --path /etc/hosts --hosts web
-  dispatch file read -p /var/log/app.log -l 1000 --hosts web`,
+  dispatch file read --path /var/log/app.log --limit 1000 --hosts web`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if path == "" {
 				return fmt.Errorf("--path is required")
@@ -948,9 +947,9 @@ func fileReadCmd() *cobra.Command {
 	}
 
 	cmd.Flags().StringSliceVar(&hosts, "hosts", nil, "Host group or comma-separated host list (required)")
-	cmd.Flags().StringVarP(&path, "path", "p", "", "File path to read (required)")
-	cmd.Flags().Int64VarP(&offset, "offset", "o", 0, "Read starting position")
-	cmd.Flags().Int64VarP(&limit, "limit", "l", 0, "Max bytes to read (0 = all)")
+	cmd.Flags().StringVar(&path, "path", "", "File path to read (required)")
+	cmd.Flags().Int64Var(&offset, "offset", 0, "Read starting position")
+	cmd.Flags().Int64Var(&limit, "limit", 0, "Max bytes to read (0 = all)")
 
 	return cmd
 }
