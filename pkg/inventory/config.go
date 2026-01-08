@@ -189,6 +189,7 @@ func (inv *Inventory) GetHosts(patterns []string) ([]Host, error) {
 }
 
 // buildHost builds host configuration, merging defaults and overrides
+// Priority: TOML host > TOML group > SSH config > defaults
 func (inv *Inventory) buildHost(address string, group string) Host {
 	host := Host{
 		Address: address,
@@ -232,6 +233,23 @@ func (inv *Inventory) buildHost(address string, group string) Host {
 				host.KeyPath = groupConfig.KeyPath
 				host.KeyPathSet = true
 			}
+		}
+	}
+
+	// Check SSH config (only applied if not set at TOML host/group level)
+	if sshEntry, ok := GetSSHConfigEntry(address); ok {
+		// Update Address if HostName is set in SSH config
+		if sshEntry.HostName != "" {
+			host.Address = sshEntry.HostName
+		}
+		if !host.UserSet && sshEntry.User != "" {
+			host.User = sshEntry.User
+		}
+		if !host.PortSet && sshEntry.Port != 0 {
+			host.Port = sshEntry.Port
+		}
+		if !host.KeyPathSet && sshEntry.KeyPath != "" {
+			host.KeyPath = sshEntry.KeyPath
 		}
 	}
 
