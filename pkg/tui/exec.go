@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 )
 
 const maxOutputLen = 50
@@ -250,10 +251,11 @@ func truncate(s string, max int) string {
 }
 
 func padRight(s string, width int) string {
-	if len(s) >= width {
-		return s[:width]
+	visibleWidth := runewidth.StringWidth(stripAnsi(s))
+	if visibleWidth >= width {
+		return s
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + strings.Repeat(" ", width-visibleWidth)
 }
 
 func runeWidth(s string) int {

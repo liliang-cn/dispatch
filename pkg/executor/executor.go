@@ -1356,26 +1356,41 @@ func (e *Executor) Stats(ctx context.Context, req *StatsRequest, callback func(*
 				result.Exists = false
 			} else {
 				result.Exists = true
-				// Parse: directory 4096 755 root root 1234567890
+				// Parse stat output: "regular file 222 644 root root 1765690334"
+				// or "directory 4096 755 root root 1234567890"
 				parts := strings.Fields(output)
 				if len(parts) >= 6 {
-					if parts[0] == "directory" {
-						result.IsDir = true
-					} else if strings.Contains(parts[0], "regular") {
+					// Handle multi-word file types like "regular file", "symbolic link", etc.
+					idx := 0
+					if parts[0] == "regular" && len(parts) > 1 && parts[1] == "file" {
 						result.IsDir = false
+						idx = 2 // skip "regular file"
+					} else if parts[0] == "symbolic" && len(parts) > 1 && parts[1] == "link" {
+						result.IsDir = false
+						idx = 2 // skip "symbolic link"
+					} else if parts[0] == "directory" {
+						result.IsDir = true
+						idx = 1
+					} else {
+						idx = 1 // unknown type, skip first word
 					}
-					if len(parts) > 1 {
-						fmt.Sscanf(parts[1], "%d", &result.Size)
+
+					if len(parts) > idx {
+						fmt.Sscanf(parts[idx], "%d", &result.Size)
 					}
-					if len(parts) > 2 {
+					if len(parts) > idx+1 {
 						var mode int
-						fmt.Sscanf(parts[2], "%o", &mode)
+						fmt.Sscanf(parts[idx+1], "%o", &mode)
 						result.Mode = int64(mode)
 					}
-					result.Owner = parts[3]
-					result.Group = parts[4]
-					if len(parts) > 5 {
-						fmt.Sscanf(parts[5], "%d", &result.ModTime)
+					if len(parts) > idx+2 {
+						result.Owner = parts[idx+2]
+					}
+					if len(parts) > idx+3 {
+						result.Group = parts[idx+3]
+					}
+					if len(parts) > idx+4 {
+						fmt.Sscanf(parts[idx+4], "%d", &result.ModTime)
 					}
 				}
 			}
