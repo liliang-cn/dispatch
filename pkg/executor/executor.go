@@ -1249,3 +1249,302 @@ func (e *Executor) buildCommand(cmd string, env map[string]string, dir string) s
 
 	return fmt.Sprintf("%s -c \"%s\"", shell, fullCmd)
 }
+
+// ========== Stats ==========
+
+// StatsRequest file stats request
+type StatsRequest struct {
+	Hosts    []string
+	Path     string // File path to check
+	Parallel int
+}
+
+// StatsResult file stats result
+type StatsResult struct {
+	Host      string
+	Path      string
+	Exists    bool
+	IsDir     bool
+	Size      int64
+	Mode      int64  // File permissions (octal)
+	ModTime   int64  // Unix timestamp
+	Owner     string
+	Group     string
+	StartTime time.Time
+	EndTime   time.Time
+	Err       error
+}
+
+// Stats gets file stats from remote hosts
+func (e *Executor) Stats(ctx context.Context, req *StatsRequest, callback func(*StatsResult)) error {
+	hosts, err := e.inv.GetHosts(req.Hosts)
+	if err != nil {
+		return err
+	}
+
+	if req.Parallel <= 0 {
+		req.Parallel = e.inv.GetDefaultParallel()
+	}
+
+	// Initialize connection cache for this operation
+	if err := e.beginOperation(); err != nil {
+		return err
+	}
+	defer e.endOperation()
+
+	sem := make(chan struct{}, req.Parallel)
+	var wg sync.WaitGroup
+
+	for _, host := range hosts {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(h inventory.Host) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result := &StatsResult{
+				Host:      h.Address,
+				Path:      req.Path,
+				StartTime: time.Now(),
+			}
+
+			spec := dispatchssh.HostSpec{
+				Address:    h.Address,
+				User:       h.User,
+				Port:       h.Port,
+				KeyPath:    h.KeyPath,
+				UserSet:    h.UserSet,
+				PortSet:    h.PortSet,
+				KeyPathSet: h.KeyPathSet,
+			}
+
+			conn, err := e.getConnection(spec)
+			if err != nil {
+				result.Err = fmt.Errorf("failed to get connection: %w", err)
+				result.EndTime = time.Now()
+				callback(result)
+				return
+			}
+
+			// Use stat command to get file info
+			cmd := fmt.Sprintf("stat -c '%%F %%s %%a %%U %%G %%Y' %s 2>/dev/null || echo 'NOT_FOUND'", req.Path)
+			timeout := parseTimeout(e.inv.GetConfig().SSH.Timeout)
+			execResult, err := e.execOnConn(conn, cmd, "", timeout)
+			result.EndTime = time.Now()
+
+			if err != nil {
+				result.Err = fmt.Errorf("exec failed: %w", err)
+				callback(result)
+				return
+			}
+
+			if execResult.ExitCode != 0 {
+				result.Err = fmt.Errorf("exit code %d: %s", execResult.ExitCode, string(execResult.Error))
+				callback(result)
+				return
+			}
+
+			output := string(execResult.Output)
+			if strings.Contains(output, "NOT_FOUND") {
+				result.Exists = false
+			} else {
+				result.Exists = true
+				// Parse: directory 4096 755 root root 1234567890
+				parts := strings.Fields(output)
+				if len(parts) >= 6 {
+					if parts[0] == "directory" {
+						result.IsDir = true
+					} else if strings.Contains(parts[0], "regular") {
+						result.IsDir = false
+					}
+					if len(parts) > 1 {
+						fmt.Sscanf(parts[1], "%d", &result.Size)
+					}
+					if len(parts) > 2 {
+						var mode int
+						fmt.Sscanf(parts[2], "%o", &mode)
+						result.Mode = int64(mode)
+					}
+					result.Owner = parts[3]
+					result.Group = parts[4]
+					if len(parts) > 5 {
+						fmt.Sscanf(parts[5], "%d", &result.ModTime)
+					}
+				}
+			}
+			callback(result)
+		}(host)
+	}
+
+	wg.Wait()
+	return nil
+}
+
+// ========== Read ==========
+
+// ReadRequest file read request
+type ReadRequest struct {
+	Hosts    []string
+	Path     string // File path to read
+	Parallel int
+	Offset   int64  // Read starting position
+	Limit    int64  // Max bytes to read (0 = all)
+}
+
+// ReadResult file read result
+type ReadResult struct {
+	Host      string
+	Path      string
+	Content   string  // File content (text only)
+	Offset    int64   // Current offset
+	IsBinary  bool    // Whether file is binary
+	TotalSize int64   // Total file size
+	StartTime time.Time
+	EndTime   time.Time
+	Err       error
+}
+
+// Read reads file content from remote hosts
+func (e *Executor) Read(ctx context.Context, req *ReadRequest, callback func(*ReadResult)) error {
+	hosts, err := e.inv.GetHosts(req.Hosts)
+	if err != nil {
+		return err
+	}
+
+	if req.Parallel <= 0 {
+		req.Parallel = e.inv.GetDefaultParallel()
+	}
+
+	// Initialize connection cache for this operation
+	if err := e.beginOperation(); err != nil {
+		return err
+	}
+	defer e.endOperation()
+
+	sem := make(chan struct{}, req.Parallel)
+	var wg sync.WaitGroup
+
+	for _, host := range hosts {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(h inventory.Host) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			result := &ReadResult{
+				Host:      h.Address,
+				Path:      req.Path,
+				Offset:    req.Offset,
+				StartTime: time.Now(),
+			}
+
+			spec := dispatchssh.HostSpec{
+				Address:    h.Address,
+				User:       h.User,
+				Port:       h.Port,
+				KeyPath:    h.KeyPath,
+				UserSet:    h.UserSet,
+				PortSet:    h.PortSet,
+				KeyPathSet: h.KeyPathSet,
+			}
+
+			conn, err := e.getConnection(spec)
+			if err != nil {
+				result.Err = fmt.Errorf("failed to get connection: %w", err)
+				result.EndTime = time.Now()
+				callback(result)
+				return
+			}
+
+			timeout := parseTimeout(e.inv.GetConfig().SSH.Timeout)
+
+			// Check if file exists and get size
+			statCmd := fmt.Sprintf("stat -c '%%s' %s 2>/dev/null || echo 'NOT_FOUND'", req.Path)
+			statResult, err := e.execOnConn(conn, statCmd, "", timeout)
+			if err != nil {
+				result.Err = fmt.Errorf("stat failed: %w", err)
+				result.EndTime = time.Now()
+				callback(result)
+				return
+			}
+
+			statOutput := string(statResult.Output)
+			if strings.Contains(statOutput, "NOT_FOUND") {
+				result.Err = fmt.Errorf("file not found: %s", req.Path)
+				result.EndTime = time.Now()
+				callback(result)
+				return
+			}
+
+			fmt.Sscanf(strings.TrimSpace(statOutput), "%d", &result.TotalSize)
+
+			// Check if file is binary
+			checkCmd := fmt.Sprintf("file -b --mime-type %s 2>/dev/null || echo 'unknown'", req.Path)
+			checkResult, err := e.execOnConn(conn, checkCmd, "", timeout)
+			if err == nil {
+				mime := strings.TrimSpace(string(checkResult.Output))
+				if strings.HasPrefix(mime, "application/octet-stream") ||
+					strings.HasPrefix(mime, "application/x-") ||
+					strings.Contains(mime, "binary") {
+					result.IsBinary = true
+				}
+			}
+
+			// Build read command
+			readCmd := fmt.Sprintf("cat %s", req.Path)
+			if req.Offset > 0 {
+				readCmd = fmt.Sprintf("tail -c +%d %s", req.Offset+1, req.Path)
+			}
+			if req.Limit > 0 {
+				readCmd = fmt.Sprintf("%s | head -c %d", readCmd, req.Limit)
+			}
+
+			execResult, err := e.execOnConn(conn, readCmd, "", timeout)
+			result.EndTime = time.Now()
+
+			if err != nil {
+				result.Err = fmt.Errorf("read failed: %w", err)
+				callback(result)
+				return
+			}
+
+			if execResult.ExitCode != 0 {
+				result.Err = fmt.Errorf("exit code %d: %s", execResult.ExitCode, string(execResult.Error))
+				callback(result)
+				return
+			}
+
+			result.Content = string(execResult.Output)
+			callback(result)
+		}(host)
+	}
+
+	wg.Wait()
+	return nil
+}
+
+// parseTimeout parses timeout string to duration
+func parseTimeout(timeoutStr string) time.Duration {
+	if timeoutStr == "" {
+		return 30 * time.Second
+	}
+	d, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		return 30 * time.Second
+	}
+	return d
+}

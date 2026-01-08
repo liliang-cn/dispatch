@@ -87,6 +87,8 @@ const (
 	JobTypeExec JobType = iota // Exec command operation
 	JobTypeCopy                 // Copy file operation
 	JobTypeFetch                // Fetch file operation
+	JobTypeStats                // Stats file operation
+	JobTypeRead                 // Read file operation
 )
 
 const (
@@ -385,6 +387,61 @@ func (s *Server) Fetch(req *pb.FetchRequest, stream pb.Dispatch_FetchServer) err
 	job.mu.Unlock()
 
 	return nil
+}
+
+// Stats streams file stats from remote hosts.
+func (s *Server) Stats(req *pb.StatsRequest, stream pb.Dispatch_StatsServer) error {
+	ctx := context.Background()
+
+	statsReq := &executor.StatsRequest{
+		Hosts:    req.Hosts,
+		Path:     req.Path,
+		Parallel: int(req.Parallel),
+	}
+
+	callback := func(result *executor.StatsResult) {
+		stream.Send(&pb.StatsResponse{
+			Host:     result.Host,
+			Exists:   result.Exists,
+			IsDir:    result.IsDir,
+			Size:     result.Size,
+			Mode:     result.Mode,
+			ModTime:  result.ModTime,
+			Owner:    result.Owner,
+			Group:    result.Group,
+			Error:    errorMsg(result),
+			Finished: true,
+		})
+	}
+
+	return s.executor.Stats(ctx, statsReq, callback)
+}
+
+// Read streams file content from remote hosts.
+func (s *Server) Read(req *pb.ReadRequest, stream pb.Dispatch_ReadServer) error {
+	ctx := context.Background()
+
+	readReq := &executor.ReadRequest{
+		Hosts:    req.Hosts,
+		Path:     req.Path,
+		Parallel: int(req.Parallel),
+		Offset:   req.Offset,
+		Limit:    req.Limit,
+	}
+
+	callback := func(result *executor.ReadResult) {
+		stream.Send(&pb.ReadResponse{
+			Host:      result.Host,
+			Content:   []byte(result.Content),
+			Offset:    result.Offset,
+			IsBinary:  result.IsBinary,
+			TotalSize: result.TotalSize,
+			Error:     errorMsg(result),
+			Finished:  true,
+		})
+	}
+
+	return s.executor.Read(ctx, readReq, callback)
 }
 
 // Hosts returns information about configured hosts and groups.

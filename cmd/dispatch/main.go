@@ -333,6 +333,8 @@ func fileCmd() *cobra.Command {
 	cmd.AddCommand(fileGetCmd())
 	cmd.AddCommand(fileUpdateCmd())
 	cmd.AddCommand(fileDeleteCmd())
+	cmd.AddCommand(fileStatsCmd())
+	cmd.AddCommand(fileReadCmd())
 
 	return cmd
 }
@@ -798,6 +800,168 @@ func fileDeleteCmd() *cobra.Command {
 	cmd.Flags().StringVar(&path, "p", "", "Short for path")
 
 	return cmd
+}
+
+// fileStatsCmd checks file stats on remote hosts
+func fileStatsCmd() *cobra.Command {
+	var hosts []string
+	var path string
+
+	cmd := &cobra.Command{
+		Use:   "stats [OPTIONS]",
+		Short: "Check file stats on remote hosts",
+		Example: `  dispatch file stats --path /etc/nginx/nginx.conf --hosts web
+  dispatch file stats -p /var/log/app.log --hosts "host1,host2"`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if path == "" {
+				return fmt.Errorf("--path is required")
+			}
+			if len(hosts) == 0 {
+				return fmt.Errorf("--hosts is required")
+			}
+
+			exec, _, err := getExecutor()
+			if err != nil {
+				return fmt.Errorf("failed to load inventory: %w", err)
+			}
+
+			ctx := context.Background()
+
+			req := &executor.StatsRequest{
+				Hosts:    hosts,
+				Path:     path,
+				Parallel: parallel,
+			}
+
+			fmt.Printf("Checking stats for: %s\n", path)
+			fmt.Printf("Hosts: %v\n\n", hosts)
+
+			err = exec.Stats(ctx, req, func(result *executor.StatsResult) {
+				if result.Err != nil {
+					fmt.Printf("  [%s] Error: %v\n", result.Host, result.Err)
+					return
+				}
+
+				if !result.Exists {
+					fmt.Printf("  [%s] Does not exist\n", result.Host)
+					return
+				}
+
+				fileType := "file"
+				if result.IsDir {
+					fileType = "directory"
+				}
+
+				duration := result.EndTime.Sub(result.StartTime).Milliseconds()
+				fmt.Printf("  [%s] %s\n", result.Host, fileType)
+				fmt.Printf("       Size: %d bytes\n", result.Size)
+				fmt.Printf("       Mode: %04o\n", result.Mode)
+				fmt.Printf("       Owner: %s\n", result.Owner)
+				fmt.Printf("       Group: %s\n", result.Group)
+				fmt.Printf("       ModTime: %d\n", result.ModTime)
+				fmt.Printf("       Time: %dms\n\n", duration)
+			})
+
+			return err
+		},
+	}
+
+	cmd.Flags().StringSliceVar(&hosts, "hosts", nil, "Host group or comma-separated host list (required)")
+	cmd.Flags().StringVarP(&path, "path", "p", "", "File path to check (required)")
+
+	return cmd
+}
+
+// fileReadCmd reads file content from remote hosts
+func fileReadCmd() *cobra.Command {
+	var hosts []string
+	var path string
+	var offset int64
+	var limit int64
+
+	cmd := &cobra.Command{
+		Use:   "read [OPTIONS]",
+		Short: "Read file content from remote hosts",
+		Example: `  dispatch file read --path /etc/hosts --hosts web
+  dispatch file read -p /var/log/app.log -l 1000 --hosts web`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if path == "" {
+				return fmt.Errorf("--path is required")
+			}
+			if len(hosts) == 0 {
+				return fmt.Errorf("--hosts is required")
+			}
+
+			exec, _, err := getExecutor()
+			if err != nil {
+				return fmt.Errorf("failed to load inventory: %w", err)
+			}
+
+			ctx := context.Background()
+
+			req := &executor.ReadRequest{
+				Hosts:    hosts,
+				Path:     path,
+				Parallel: parallel,
+				Offset:   offset,
+				Limit:    limit,
+			}
+
+			fmt.Printf("Reading: %s\n", path)
+			fmt.Printf("Hosts: %v\n\n", hosts)
+
+			err = exec.Read(ctx, req, func(result *executor.ReadResult) {
+				if result.Err != nil {
+					fmt.Printf("  [%s] Error: %v\n", result.Host, result.Err)
+					return
+				}
+
+				duration := result.EndTime.Sub(result.StartTime).Milliseconds()
+				binary := ""
+				if result.IsBinary {
+					binary = " [binary]"
+				}
+				sizeInfo := fmt.Sprintf(" (%d bytes)", result.TotalSize)
+				if result.TotalSize > 0 {
+					sizeInfo = fmt.Sprintf(" (%d/%d bytes)", len(result.Content), result.TotalSize)
+				}
+
+				fmt.Printf("  [%s]%s%s:\n", result.Host, sizeInfo, binary)
+				fmt.Println("  ─────────────────────────────────")
+
+				if result.IsBinary {
+					fmt.Printf("  [Binary file, %d bytes]\n\n", result.TotalSize)
+				} else {
+					// Show content (truncated if too long)
+					content := result.Content
+					if len(content) > 500 {
+						content = content[:500] + "\n... (truncated)"
+					}
+					fmt.Printf("  %s\n\n", indentLines(content, "  "))
+				}
+
+				fmt.Printf("  Time: %dms\n\n", duration)
+			})
+
+			return err
+		},
+	}
+
+	cmd.Flags().StringSliceVar(&hosts, "hosts", nil, "Host group or comma-separated host list (required)")
+	cmd.Flags().StringVarP(&path, "path", "p", "", "File path to read (required)")
+	cmd.Flags().Int64VarP(&offset, "offset", "o", 0, "Read starting position")
+	cmd.Flags().Int64VarP(&limit, "limit", "l", 0, "Max bytes to read (0 = all)")
+
+	return cmd
+}
+
+// indentLines indents each line of a string
+func indentLines(s, indent string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // hostsCmd lists hosts

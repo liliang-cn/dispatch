@@ -15,6 +15,12 @@ service Dispatch {
   // 从远程主机下载文件
   rpc Fetch(FetchRequest) returns (stream FetchResponse);
 
+  // 获取远程文件状态
+  rpc Stats(StatsRequest) returns (stream StatsResponse);
+
+  // 读取远程文本文件内容
+  rpc Read(ReadRequest) returns (stream ReadResponse);
+
   // 获取主机列表
   rpc Hosts(HostsRequest) returns (HostsResponse);
 
@@ -194,4 +200,45 @@ message CancelJobRequest {
 message CancelJobResponse {
   bool success = 1;                // 是否成功
   string message = 2;              // 消息
+}
+
+// ========== Stats 相关 ==========
+
+message StatsRequest {
+  repeated string hosts = 1;       // 主机列表或组名
+  string path = 2;                 // 文件路径
+  int32 parallel = 3;              // 并发数
+}
+
+message StatsResponse {
+  string host = 1;                 // 主机地址
+  bool exists = 2;                 // 文件是否存在
+  bool is_dir = 3;                 // 是否是目录
+  int64 size = 4;                  // 文件大小（字节）
+  int64 mode = 5;                  // 文件权限（八进制）
+  int64 mod_time = 6;              // 修改时间（Unix timestamp）
+  string owner = 7;                // 所有者
+  string group = 8;                // 组
+  string error = 9;                // 错误信息
+  bool finished = 10;              // 是否完成
+}
+
+// ========== Read 相关 ==========
+
+message ReadRequest {
+  repeated string hosts = 1;       // 主机列表或组名
+  string path = 2;                 // 文件路径
+  int32 parallel = 3;              // 并发数
+  int64 offset = 4;                // 读取起始位置
+  int64 limit = 5;                 // 读取最大字节数（0表示全部）
+}
+
+message ReadResponse {
+  string host = 1;                 // 主机地址
+  bytes content = 2;               // 文件内容
+  int64 offset = 3;                // 当前偏移量
+  bool is_binary = 4;              // 是否是二进制文件
+  int64 total_size = 5;            // 文件总大小
+  string error = 6;                // 错误信息
+  bool finished = 7;               // 是否完成
 }

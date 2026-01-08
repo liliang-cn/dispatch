@@ -652,3 +652,195 @@ func (d *Dispatch) GetHosts(patterns []string) ([]inventory.Host, error) {
 func (d *Dispatch) GetAllGroups() map[string][]string {
 	return d.inv.GetAllGroups()
 }
+
+// ========== Stats ==========
+
+// StatsOption is a function that configures a Stats operation.
+type StatsOption func(*statsOptions)
+
+type statsOptions struct {
+	parallel int
+}
+
+// WithStatsParallel sets the parallelism for stats operations.
+func WithStatsParallel(n int) StatsOption {
+	return func(o *statsOptions) {
+		o.parallel = n
+	}
+}
+
+// Stats gets file stats from remote hosts.
+func (d *Dispatch) Stats(ctx context.Context, hosts []string, path string, opts ...StatsOption) (*StatsResult, error) {
+	options := &statsOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	req := &executor.StatsRequest{
+		Hosts:    hosts,
+		Path:     path,
+		Parallel: options.parallel,
+	}
+
+	result := &StatsResult{
+		Hosts:     make(map[string]*StatsHostResult),
+		StartTime: time.Now(),
+	}
+
+	mu := sync.Mutex{}
+
+	err := d.executor.Stats(ctx, req, func(r *executor.StatsResult) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		hostResult := &StatsHostResult{
+			Host:      r.Host,
+			Path:      r.Path,
+			Exists:    r.Exists,
+			IsDir:     r.IsDir,
+			Size:      r.Size,
+			Mode:      r.Mode,
+			ModTime:   r.ModTime,
+			Owner:     r.Owner,
+			Group:     r.Group,
+			StartTime: r.StartTime,
+			EndTime:   r.EndTime,
+		}
+		if r.Err != nil {
+			hostResult.Error = r.Err
+			hostResult.Success = false
+		} else {
+			hostResult.Success = true
+		}
+		result.Hosts[r.Host] = hostResult
+	})
+
+	result.EndTime = time.Now()
+	return result, err
+}
+
+// StatsResult contains the results of getting file stats from multiple hosts.
+type StatsResult struct {
+	Hosts     map[string]*StatsHostResult
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// StatsHostResult contains the file stats from a single host.
+type StatsHostResult struct {
+	Host      string
+	Path      string
+	Exists    bool
+	IsDir     bool
+	Size      int64
+	Mode      int64
+	ModTime   int64
+	Owner     string
+	Group     string
+	Success   bool
+	Error     error
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// ========== Read ==========
+
+// ReadOption is a function that configures a Read operation.
+type ReadOption func(*readOptions)
+
+type readOptions struct {
+	parallel int
+	offset   int64
+	limit    int64
+}
+
+// WithReadParallel sets the parallelism for read operations.
+func WithReadParallel(n int) ReadOption {
+	return func(o *readOptions) {
+		o.parallel = n
+	}
+}
+
+// WithReadOffset sets the starting offset for reading.
+func WithReadOffset(n int64) ReadOption {
+	return func(o *readOptions) {
+		o.offset = n
+	}
+}
+
+// WithReadLimit sets the maximum bytes to read (0 = all).
+func WithReadLimit(n int64) ReadOption {
+	return func(o *readOptions) {
+		o.limit = n
+	}
+}
+
+// Read reads file content from remote hosts.
+func (d *Dispatch) Read(ctx context.Context, hosts []string, path string, opts ...ReadOption) (*ReadResult, error) {
+	options := &readOptions{}
+	for _, opt := range opts {
+		opt(options)
+	}
+
+	req := &executor.ReadRequest{
+		Hosts:    hosts,
+		Path:     path,
+		Parallel: options.parallel,
+		Offset:   options.offset,
+		Limit:    options.limit,
+	}
+
+	result := &ReadResult{
+		Hosts:     make(map[string]*ReadHostResult),
+		StartTime: time.Now(),
+	}
+
+	mu := sync.Mutex{}
+
+	err := d.executor.Read(ctx, req, func(r *executor.ReadResult) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		hostResult := &ReadHostResult{
+			Host:      r.Host,
+			Path:      r.Path,
+			Content:   r.Content,
+			Offset:    r.Offset,
+			IsBinary:  r.IsBinary,
+			TotalSize: r.TotalSize,
+			StartTime: r.StartTime,
+			EndTime:   r.EndTime,
+		}
+		if r.Err != nil {
+			hostResult.Error = r.Err
+			hostResult.Success = false
+		} else {
+			hostResult.Success = true
+		}
+		result.Hosts[r.Host] = hostResult
+	})
+
+	result.EndTime = time.Now()
+	return result, err
+}
+
+// ReadResult contains the results of reading a file from multiple hosts.
+type ReadResult struct {
+	Hosts     map[string]*ReadHostResult
+	StartTime time.Time
+	EndTime   time.Time
+}
+
+// ReadHostResult contains the file content from a single host.
+type ReadHostResult struct {
+	Host      string
+	Path      string
+	Content   string
+	Offset    int64
+	IsBinary  bool
+	TotalSize int64
+	Success   bool
+	Error     error
+	StartTime time.Time
+	EndTime   time.Time
+}

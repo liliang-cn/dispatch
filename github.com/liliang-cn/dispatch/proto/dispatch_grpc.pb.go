@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.0
 // - protoc             v3.21.12
-// source: dispatch.proto
+// source: proto/dispatch.proto
 
 package proto
 
@@ -462,5 +462,5 @@ var Dispatch_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "dispatch.proto",
+	Metadata: "proto/dispatch.proto",
 }
