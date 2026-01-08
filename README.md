@@ -36,60 +36,159 @@ sudo mv bin/dispatch /usr/local/bin/
 
 ## Configuration
 
-Create `~/.dispatch/config.toml`:
+Configuration file location: `~/.dispatch/config.toml`
+
+### Quick Example
 
 ```toml
-# SSH default settings
 [ssh]
 user = "root"
 port = 22
 key_path = "~/.ssh/id_rsa"
-timeout = "30s"
-known_hosts = "~/.ssh/known_hosts"   # Host key verification (empty = disable)
-strict_host_key = false               # true = reject unknown hosts, false = auto-add
 
-# Execution settings
-[exec]
-parallel = 10              # Default parallel connections
-timeout = "5m"             # Command timeout
-shell = "/bin/bash"        # Remote shell
-
-# Logging
-[log]
-level = "info"             # debug, info, warn, error
-output = "stdout"          # stdout, stderr, or file path
-no_color = false           # Disable colored output
-show_time = false          # Show timestamps
-
-# Host groups
 [hosts.web]
-addresses = [
-    "192.168.1.10",
-    "192.168.1.11",
-    "192.168.1.12"
-]
-user = "www-data"          # Override default user for this group
+addresses = ["192.168.1.10", "192.168.1.11"]
+user = "www-data"
+```
 
+### Complete Configuration Reference
+
+```toml
+# ============================================
+# SSH Default Settings
+# ============================================
+[ssh]
+user           = "root"              # Default SSH user
+port           = 22                  # Default SSH port
+key_path       = "~/.ssh/id_rsa"     # Default private key path
+timeout        = "30s"               # Connection timeout
+known_hosts    = "~/.ssh/known_hosts" # Host key verification (empty = disable)
+strict_host_key = false              # true = reject unknown hosts, false = auto-add
+
+# ============================================
+# Execution Settings
+# ============================================
+[exec]
+parallel = 10        # Default parallel connections (default: 10)
+timeout  = "5m"      # Command timeout (default: 5 minutes)
+shell    = "/bin/bash" # Remote shell (default: /bin/bash)
+
+# ============================================
+# Logging Settings
+# ============================================
+[log]
+level     = "info"   # debug, info, warn, error (default: info)
+output    = "stdout" # stdout, stderr, or file path
+no_color  = false    # Disable colored output (default: false)
+show_time = false    # Show timestamps (default: false)
+
+# ============================================
+# Host Groups
+# ============================================
+# Group with multiple hosts, same user
+[hosts.web]
+addresses = ["192.168.1.10", "192.168.1.11", "192.168.1.12"]
+user      = "www-data"   # Override default user for this group
+port      = 22           # Override default port (optional)
+key_path  = "~/.ssh/web_key" # Override default key (optional)
+
+# Group with default settings
 [hosts.db]
 addresses = ["192.168.1.20", "192.168.1.21"]
 
-[hosts.all]
-addresses = [
-    "192.168.1.10", "192.168.1.11", "192.168.1.12",
-    "192.168.1.20", "192.168.1.21"
-]
+# Single host (useful for per-host override)
+[hosts.api-server]
+addresses = ["192.168.1.100"]
+user      = "api"
+key_path  = "~/.ssh/api_key"
+port      = 2222
 ```
 
-## Configuration Priority
+### Per-Host Configuration
 
-dispatch respects configuration from multiple sources in the following order:
+You can configure individual hosts with different users, ports, or keys:
 
-1. **TOML host-level config** (highest priority)
-2. **TOML group-level config**
-3. **~/.ssh/config**
-4. **/etc/hosts** (for hostname resolution fallback)
+```toml
+[ssh]
+user = "root"
+key_path = "~/.ssh/id_rsa"
 
-This means if you set `user = "admin"` in your TOML file for a host, it will override the `User` setting in `~/.ssh/config`.
+# Different user for web servers
+[hosts.web]
+addresses = ["web1", "web2", "web3"]
+user = "www-data"
+port = 22
+
+# Different user and key for database servers
+[hosts.db]
+addresses = ["db1", "db2"]
+user = "dbadmin"
+key_path = "~/.ssh/db_key"
+
+# Override specific host within a group
+[hosts.web1]
+user = "admin"      # This overrides the group's user
+key_path = "~/.ssh/admin_key"
+```
+
+### Using SSH Aliases
+
+You can use SSH config aliases as addresses:
+
+```toml
+# Assuming ~/.ssh/config has:
+# Host gui01
+#     HostName 192.168.123.117
+#     User ubuntu
+
+[hosts.gui]
+addresses = ["gui01", "gui02", "gui03"]
+# user will be read from ~/.ssh/config
+```
+
+### Wildcard Support
+
+Use wildcards to match hosts from your SSH config:
+
+```bash
+# Match all hosts starting with "gui"
+dispatch exec --hosts "gui*" -- "uptime"
+
+# Match all hosts starting with "web"
+dispatch exec --hosts "web*" -- "systemctl status nginx"
+```
+
+### Configuration Priority
+
+When multiple sources define settings for a host, dispatch uses this priority (highest to lowest):
+
+1. **TOML host-level** - `[hosts.hostname]` (highest)
+2. **TOML group-level** - `[hosts.groupname]`
+3. **~/.ssh/config** - SSH config file
+4. **Default values** - from `[ssh]` section (lowest)
+
+Example:
+
+```toml
+[ssh]
+user = "root"          # Default user
+port = 22              # Default port
+
+[hosts.web]
+addresses = ["web1", "web2"]
+user = "www-data"      # Group override
+
+[hosts.web1]
+user = "admin"         # Host override (highest priority)
+```
+
+For `web1`:
+- User: `admin` (from host-level)
+- Port: `22` (from default)
+
+For `web2`:
+- User: `www-data` (from group-level)
+- Port: `22` (from default)
 
 ## Usage
 
