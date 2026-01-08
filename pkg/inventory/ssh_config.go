@@ -161,6 +161,65 @@ func GetSSHConfigEntry(hostOrAlias string) (SSHConfigEntry, bool) {
 	return SSHConfigEntry{}, false
 }
 
+// ExpandWildcardFromSSHConfig expands a wildcard pattern against SSH config entries
+// Returns a list of host aliases that match the pattern
+func ExpandWildcardFromSSHConfig(pattern string) []string {
+	entries, err := LoadSSHConfig()
+	if err != nil {
+		return nil
+	}
+
+	var matches []string
+	seen := make(map[string]bool)
+
+	// Convert pattern to a simple glob (only * at the end for now)
+	for _, e := range entries {
+		for _, hostPattern := range e.HostPatterns {
+			// Skip if this host is already matched
+			if seen[hostPattern] {
+				continue
+			}
+
+			if matchPattern(pattern, hostPattern) {
+				matches = append(matches, hostPattern)
+				seen[hostPattern] = true
+			}
+		}
+	}
+
+	return matches
+}
+
+// matchPattern matches a pattern against a string
+// Supports * wildcard only
+func matchPattern(pattern, s string) bool {
+	// Fast path: exact match
+	if pattern == s {
+		return true
+	}
+
+	// Simple wildcard matching (only * at the end)
+	if strings.HasSuffix(pattern, "*") {
+		prefix := strings.TrimSuffix(pattern, "*")
+		return strings.HasPrefix(s, prefix)
+	}
+
+	// If pattern starts with *, match suffix
+	if strings.HasPrefix(pattern, "*") {
+		suffix := strings.TrimPrefix(pattern, "*")
+		return strings.HasSuffix(s, suffix)
+	}
+
+	// If pattern has * in middle, split and match both sides
+	if idx := strings.Index(pattern, "*"); idx >= 0 {
+		prefix := pattern[:idx]
+		suffix := pattern[idx+1:]
+		return strings.HasPrefix(s, prefix) && strings.HasSuffix(s, suffix)
+	}
+
+	return false
+}
+
 // ReloadSSHConfig clears the cache and reloads SSH config
 func ReloadSSHConfig() {
 	globalSSHConfig.mu.Lock()

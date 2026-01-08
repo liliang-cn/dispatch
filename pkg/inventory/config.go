@@ -172,6 +172,18 @@ func (inv *Inventory) GetHosts(patterns []string) ([]Host, error) {
 					seen[addr] = true
 				}
 			}
+		} else if strings.ContainsAny(pattern, "*?[") {
+			// Expand wildcard from SSH config
+			matches := ExpandWildcardFromSSHConfig(pattern)
+			for _, match := range matches {
+				if !seen[match] {
+					hosts = append(hosts, inv.buildHost(match, ""))
+					seen[match] = true
+				}
+			}
+			if len(matches) == 0 {
+				return nil, fmt.Errorf("no hosts found for wildcard pattern: %s", pattern)
+			}
 		} else {
 			// Treat as direct host address
 			if !seen[pattern] {
