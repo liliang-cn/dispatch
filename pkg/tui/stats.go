@@ -134,11 +134,11 @@ func (m StatsModel) View() string {
 	s.WriteString("\n\n")
 
 	// Calculate column widths
-	pathW := 50
-	statusW := 20
+	pathW := 30
+	statusW := 22
 	sizeW := 15
 	permsW := 10
-	ownerW := 12
+	ownerW := 18
 
 	m.renderStatsTable(&s, pathW, statusW, sizeW, permsW, ownerW)
 
@@ -170,7 +170,7 @@ func (m *StatsModel) renderStatsTable(b *strings.Builder, pathW, statusW, sizeW,
 	b.WriteString(statsBorderStyle.Render("│"))
 	b.WriteString(fmt.Sprintf(" %-*s ", permsW-2, "Mode"))
 	b.WriteString(statsBorderStyle.Render("│"))
-	b.WriteString(fmt.Sprintf(" %-*s ", ownerW-2, "Owner"))
+	b.WriteString(fmt.Sprintf(" %-*s ", ownerW-2, "Owner:Group"))
 	b.WriteString(statsBorderStyle.Render("│"))
 	b.WriteString("\n")
 
@@ -194,20 +194,20 @@ func (m *StatsModel) renderStatsTable(b *strings.Builder, pathW, statusW, sizeW,
 			perms = "-"
 			owner = "-"
 		} else if state.err != nil {
-			status = notFoundStyle.Render("✗ Error")
+			status = notFoundStyle.Render("Error")
 			size = "-"
 			perms = "-"
 			owner = "-"
 		} else if !state.exists {
-			status = notFoundStyle.Render("✗ Not found")
+			status = notFoundStyle.Render("Not found")
 			size = "-"
 			perms = "-"
 			owner = "-"
 		} else {
 			if state.isDir {
-				status = existsStyle.Render("📁 Directory")
+				status = existsStyle.Render("DIR")
 			} else {
-				status = existsStyle.Render("📄 File")
+				status = existsStyle.Render("FILE")
 			}
 			size = formatBytes(state.size)
 			perms = fmt.Sprintf("%04o", state.mode)
@@ -248,11 +248,11 @@ func (m StatsModel) renderFinal() string {
 	s.WriteString(fmt.Sprintf("Path: %s\n\n", m.path))
 
 	// Calculate column widths
-	pathW := 25
-	statusW := 20
+	pathW := 30
+	statusW := 22
 	sizeW := 15
 	permsW := 10
-	ownerW := 12
+	ownerW := 18
 	timeW := 12
 
 	hBorder := "─"
@@ -299,22 +299,22 @@ func (m StatsModel) renderFinal() string {
 		var status, size, perms, owner, timeStr string
 
 		if state.err != nil {
-			status = notFoundStyle.Render("✗ Error")
+			status = notFoundStyle.Render("Error")
 			size = "-"
 			perms = "-"
 			owner = "-"
 			timeStr = "-"
 		} else if !state.exists {
-			status = notFoundStyle.Render("✗ Not found")
+			status = notFoundStyle.Render("Not found")
 			size = "-"
 			perms = "-"
 			owner = "-"
 			timeStr = "-"
 		} else {
 			if state.isDir {
-				status = existsStyle.Render("📁 Directory")
+				status = existsStyle.Render("DIR")
 			} else {
-				status = existsStyle.Render("📄 File")
+				status = existsStyle.Render("FILE")
 			}
 			size = formatBytes(state.size)
 			perms = fmt.Sprintf("%04o", state.mode)
