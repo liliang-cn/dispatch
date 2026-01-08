@@ -810,7 +810,8 @@ func fileStatsCmd() *cobra.Command {
 		Use:   "stats [OPTIONS]",
 		Short: "Check file stats on remote hosts",
 		Example: `  dispatch file stats --path /etc/nginx/nginx.conf --hosts web
-  dispatch file stats --path /var/log/app.log --hosts "host1,host2"`,
+  dispatch file stats --path /var/log/app.log --hosts "host1,host2"
+  dispatch file stats --path /etc/hosts --hosts orange --no-tui`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if path == "" {
 				return fmt.Errorf("--path is required")
@@ -819,13 +820,64 @@ func fileStatsCmd() *cobra.Command {
 				return fmt.Errorf("--hosts is required")
 			}
 
-			exec, _, err := getExecutor()
+			exec, inv, err := getExecutor()
 			if err != nil {
 				return fmt.Errorf("failed to load inventory: %w", err)
 			}
 
 			ctx := context.Background()
 
+			// Resolve host names
+			hostList, err := inv.GetHosts(hosts)
+			if err != nil {
+				return fmt.Errorf("failed to resolve hosts: %w", err)
+			}
+			var hostNames []string
+			for _, h := range hostList {
+				hostNames = append(hostNames, h.Address)
+			}
+
+			// Check if we should use TUI mode
+			useTUI := !noTUI && len(hostNames) > 1 && isatty.IsTerminal(os.Stdout.Fd())
+
+			if useTUI {
+				model := tui.NewStatsModel(hostNames, path)
+				program := tea.NewProgram(model, tea.WithoutSignalHandler())
+
+				req := &executor.StatsRequest{
+					Hosts:    hostNames,
+					Path:     path,
+					Parallel: parallel,
+				}
+
+				errChan := make(chan error, 1)
+				go func() {
+					err := exec.Stats(ctx, req, func(result *executor.StatsResult) {
+						program.Send(tui.StatsMsg{
+							Host:    result.Host,
+							Exists:  result.Exists,
+							IsDir:   result.IsDir,
+							Size:    result.Size,
+							Mode:    result.Mode,
+							ModTime: result.ModTime,
+							Owner:   result.Owner,
+							Group:   result.Group,
+							Err:     result.Err,
+							EndTime: result.EndTime,
+						})
+					})
+					// After all done, send quit
+					program.Send(tui.DoneMsg{})
+					errChan <- err
+				}()
+
+				if _, err := program.Run(); err != nil {
+					return fmt.Errorf("TUI error: %w", err)
+				}
+				return <-errChan
+			}
+
+			// CLI text mode
 			req := &executor.StatsRequest{
 				Hosts:    hosts,
 				Path:     path,
