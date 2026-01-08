@@ -169,13 +169,15 @@ func execCmd() *cobra.Command {
 				exitCode int
 				err      error
 				done     bool
+				printed  bool // 标记是否已打印（避免重复）
 			}
 			hostStates := make(map[string]*hostExecState)
 			for _, h := range hostNames {
 				hostStates[h] = &hostExecState{}
 			}
 
-			// Set StreamCallback to capture streaming output
+			// Set StreamCallback to capture streaming output (for both TUI and text mode)
+			// This prevents executor from printing output directly
 			if useTUI {
 				req.StreamCallback = func(host, streamType string, data []byte) {
 					hs := hostStates[host]
@@ -201,6 +203,23 @@ func execCmd() *cobra.Command {
 						Status: "running",
 						Output: output,
 					})
+				}
+			} else {
+				// Text mode: buffer output, print when host completes
+				req.StreamCallback = func(host, streamType string, data []byte) {
+					hs := hostStates[host]
+					if hs == nil {
+						return
+					}
+					hs.mu.Lock()
+					defer hs.mu.Unlock()
+
+					if streamType == "stderr" {
+						hs.stderr.Write(data)
+					} else {
+						hs.output.Write(data)
+					}
+					// Don't print in real-time for text mode
 				}
 			}
 
@@ -237,41 +256,13 @@ func execCmd() *cobra.Command {
 							})
 						}
 					} else {
-						// CLI text mode
-						// 打印 stderr（错误警告等）
+						// CLI text mode - buffer output and print grouped by host
+						// 累积输出，主机完成后统一打印
 						if len(result.Error) > 0 {
-							newError := string(result.Error)
-							existingErrLen := hs.output.Len()
-							totalErrLen := len(newError)
-
-							if totalErrLen > existingErrLen {
-								newPart := newError[existingErrLen:]
-								for _, line := range strings.Split(newPart, "\n") {
-									if line != "" && !strings.Contains(hs.output.String(), line) {
-										fmt.Printf("[%s] stderr: %s\n", result.Host, line)
-									}
-								}
-							}
+							hs.stderr.Write(result.Error)
 						}
-
-						// 打印新的输出（实时滚动）
 						if len(result.Output) > 0 {
-							newOutput := string(result.Output)
-							existingLen := hs.output.Len()
-							totalLen := len(newOutput)
-
-							if totalLen > existingLen {
-								// 只打印新增的部分
-								newPart := newOutput[existingLen:]
-								hs.output.WriteString(newPart)
-								// 逐行打印，跳过空行
-								lines := strings.Split(newPart, "\n")
-								for i, line := range lines {
-									if line != "" || (i < len(lines)-1) {
-										fmt.Printf("[%s] %s\n", result.Host, line)
-									}
-								}
-							}
+							hs.output.Write(result.Output)
 						}
 
 						// 记录退出码和错误
@@ -282,17 +273,40 @@ func execCmd() *cobra.Command {
 							hs.err = result.Err
 						}
 
-						// 命令完成时显示最终状态
-						if !result.EndTime.IsZero() {
+						// 命令完成时打印该主机的完整输出（只打印一次）
+						if !result.EndTime.IsZero() && !hs.printed {
+							hs.printed = true
 							hs.done = true
 							duration := result.EndTime.Sub(result.StartTime).Milliseconds()
-							fmt.Printf("  [%s] ", result.Host)
+
+							// 打印主机分隔符
+							fmt.Printf("\n\033[1;36m====== [%s] ======\033[0m\n", result.Host)
+
+							// 先打印 stderr（如果有）
+							stderr := hs.stderr.String()
+							if stderr != "" {
+								for _, line := range strings.Split(strings.TrimSpace(stderr), "\n") {
+									if line != "" {
+										fmt.Printf("\033[33m%s\033[0m\n", line)
+									}
+								}
+							}
+
+							// 再打印 stdout
+							output := hs.output.String()
+							if output != "" {
+								// 去掉末尾可能的换行，避免多余空行
+								output = strings.TrimRight(output, "\n")
+								fmt.Printf("%s\n", output)
+							}
+
+							// 打印最终状态
 							if hs.err != nil {
-								fmt.Printf("\033[31m✗ Error: %v\033[0m (%dms)\n", hs.err, duration)
+								fmt.Printf("\033[31m✗ Error: %v\033[0m (%dms)\n\n", hs.err, duration)
 							} else if hs.exitCode != 0 {
-								fmt.Printf("\033[31m✗ Exit code: %d\033[0m (%dms)\n", hs.exitCode, duration)
+								fmt.Printf("\033[31m✗ Exit code: %d\033[0m (%dms)\n\n", hs.exitCode, duration)
 							} else {
-								fmt.Printf("\033[32m✓ Success\033[0m (%dms)\n", duration)
+								fmt.Printf("\033[32m✓ Success\033[0m (%dms)\n\n", duration)
 							}
 						}
 					}

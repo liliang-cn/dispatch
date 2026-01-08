@@ -47,12 +47,13 @@ type execHostState struct {
 
 // ExecModel is the TUI model for exec command
 type ExecModel struct {
-	hosts    []string
-	states   map[string]*execHostState
-	mu       sync.RWMutex
-	quitting bool
-	spinner  int
-	command  string
+	hosts     []string
+	states    map[string]*execHostState
+	mu        sync.RWMutex
+	quitting  bool
+	spinner   int
+	command   string
+	tickCount int // For rotating output display
 }
 
 type tickMsg time.Time
@@ -97,6 +98,7 @@ func (m *ExecModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.spinner = (m.spinner + 1) % len(spinnerFrames)
+		m.tickCount++
 		return m, tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
 			return tickMsg(t)
 		})
@@ -138,10 +140,10 @@ func (m *ExecModel) View() string {
 
 	// Fixed column widths (content width, not including borders)
 	const (
-		colHost   = 18
-		colStatus = 12
-		colTime   = 8
-		colOutput = 40
+		colHost   = 20
+		colStatus = 14
+		colTime   = 10
+		colOutput = 60
 	)
 
 	// Border parts
@@ -195,17 +197,38 @@ func (m *ExecModel) View() string {
 			duration = fmt.Sprintf("%dms", elapsed)
 		}
 
-		// Output
+		// Output - show rotating lines for long-running commands
 		output := ""
 		if state.err != nil {
 			output = truncate(state.err.Error(), colOutput)
 		} else if state.output != "" {
 			lines := strings.Split(strings.TrimSpace(state.output), "\n")
-			for j := len(lines) - 1; j >= 0; j-- {
-				line := strings.TrimSpace(lines[j])
-				if line != "" {
-					output = truncate(line, colOutput)
-					break
+			// Find non-empty lines
+			var nonEmpty []string
+			for _, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if trimmed != "" {
+					nonEmpty = append(nonEmpty, trimmed)
+				}
+			}
+
+			if len(nonEmpty) > 0 {
+				// For running commands with lots of output, rotate through lines
+				// This helps show progress for long-running commands like apt update
+				if state.status == "running" && len(nonEmpty) > 1 {
+					// Rotate every 10 ticks (~800ms) to show different lines
+					// Show more recent lines preferentially
+					rotateInterval := 10
+					offset := (m.tickCount / rotateInterval) % len(nonEmpty)
+					// Start from the end and work backwards
+					idx := len(nonEmpty) - 1 - offset
+					if idx < 0 {
+						idx = 0
+					}
+					output = truncate(nonEmpty[idx], colOutput)
+				} else {
+					// For done/error or single line, show last line
+					output = truncate(nonEmpty[len(nonEmpty)-1], colOutput)
 				}
 			}
 		}
