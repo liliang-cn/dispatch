@@ -136,7 +136,7 @@ func (m StatsModel) View() string {
 	// Calculate column widths
 	pathW := 30
 	statusW := 22
-	sizeW := 15
+	sizeW := 25
 	permsW := 10
 	ownerW := 18
 
@@ -250,7 +250,7 @@ func (m StatsModel) renderFinal() string {
 	// Calculate column widths
 	pathW := 30
 	statusW := 22
-	sizeW := 15
+	sizeW := 25
 	permsW := 10
 	ownerW := 18
 	timeW := 12

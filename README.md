@@ -267,6 +267,16 @@ When operating on multiple hosts, dispatch automatically uses TUI (Terminal UI) 
 - **file send/get/update**: Shows file transfer progress
 - **file stats**: Shows file information (size, mode, owner, etc.) in a table
 
+#### Exec Command
+
+![dispatch exec](images/exec.png)
+
+#### File Send Command
+
+![dispatch file send progress](images/file.png)
+
+![dispatch file send complete](images/file2.png)
+
 To disable TUI and use plain text output, add `--no-tui`:
 
 ```bash

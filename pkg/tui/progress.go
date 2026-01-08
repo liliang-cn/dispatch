@@ -133,7 +133,7 @@ func (m Model) View() string {
 	hostW := 25
 	statusW := 18
 	progressW := 35
-	sizeW := 15
+	sizeW := 25
 
 	m.renderProgressTable(&s, hostW, statusW, progressW, sizeW)
 
@@ -238,7 +238,7 @@ func (m Model) renderFinal() string {
 	hostW := 25
 	statusW := 18
 	resultW := 35
-	sizeW := 15
+	sizeW := 25
 
 	hBorder := "─"
 
