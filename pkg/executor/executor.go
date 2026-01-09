@@ -199,17 +199,33 @@ func (e *Executor) execOnConn(sshClient *ssh.Client, cmd string, input string, t
 
 	// Set timeout
 	if timeout > 0 {
-		done := make(chan error, 1)
+		type result struct {
+			err error
+		}
+		done := make(chan result, 1)
 		go func() {
-			done <- session.Run(cmd)
+			done <- result{session.Run(cmd)}
 		}()
 
 		select {
-		case err := <-done:
-			return e.parseExecResult(stdoutBuf.String(), stderrBuf.String(), err)
+		case res := <-done:
+			return e.parseExecResult(stdoutBuf.String(), stderrBuf.String(), res.err)
 		case <-time.After(timeout):
-			sshClient.Close()
-			return nil, fmt.Errorf("command timed out after %v", timeout)
+			// Send SIGINT to the process before closing session
+			session.Signal(ssh.SIGINT)
+			// Close the session to terminate the command
+			session.Close()
+			// Wait a bit for the goroutine to finish and capture any remaining output
+			select {
+			case res := <-done:
+				// Goroutine finished, return partial result
+				return e.parseExecResult(stdoutBuf.String(), stderrBuf.String(),
+					fmt.Errorf("command timed out after %v: %w", timeout, res.err))
+			case <-time.After(100 * time.Millisecond):
+				// Goroutine didn't finish, return timeout with captured output
+				return e.parseExecResult(stdoutBuf.String(), stderrBuf.String(),
+					fmt.Errorf("command timed out after %v", timeout))
+			}
 		}
 	}
 
