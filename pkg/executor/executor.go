@@ -29,7 +29,9 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -445,6 +447,32 @@ func (e *Executor) Exec(ctx context.Context, req *ExecRequest, callback ExecResu
 				StartTime: time.Now(),
 			}
 
+			cmd := e.buildCommand(req.Cmd, req.Env, req.Dir)
+
+			// Check if this is a local host - execute directly without SSH
+			if isLocalHost(h.Address) {
+				e.logger.Debug("executing locally on %s", h.Address)
+				localResult, err := e.execLocal(cmd, req.Input, req.Timeout)
+				result.EndTime = time.Now()
+
+				if err != nil {
+					result.Err = err
+					atomic.AddInt32(&failCount, 1)
+				} else {
+					result.Output = localResult.Output
+					result.Error = localResult.Error
+					result.ExitCode = localResult.ExitCode
+					if localResult.ExitCode == 0 {
+						atomic.AddInt32(&successCount, 1)
+					} else {
+						atomic.AddInt32(&failCount, 1)
+					}
+				}
+				callback(result)
+				return
+			}
+
+			// Remote host - use SSH
 			spec := dispatchssh.HostSpec{
 				Address:    h.Address,
 				User:       h.User,
@@ -454,8 +482,6 @@ func (e *Executor) Exec(ctx context.Context, req *ExecRequest, callback ExecResu
 				PortSet:    h.PortSet,
 				KeyPathSet: h.KeyPathSet,
 			}
-
-			cmd := e.buildCommand(req.Cmd, req.Env, req.Dir)
 
 			// Get or create connection for this host
 			conn, err := e.getConnection(spec)
@@ -1238,6 +1264,118 @@ func (e *Executor) Update(ctx context.Context, req *UpdateRequest, callback func
 
 	wg.Wait()
 	return nil
+}
+
+// isLocalHost checks if the given address is a local address
+func isLocalHost(address string) bool {
+	// Check for localhost variants
+	if address == "localhost" || address == "127.0.0.1" || address == "::1" {
+		return true
+	}
+
+	// Check if address is an IP
+	ip := net.ParseIP(address)
+	if ip == nil {
+		// Not an IP, resolve hostname
+		addrs, err := net.LookupHost(address)
+		if err != nil {
+			return false
+		}
+		for _, addr := range addrs {
+			if isLocalIP(addr) {
+				return true
+			}
+		}
+		return false
+	}
+
+	return isLocalIP(ip.String())
+}
+
+// isLocalIP checks if the given IP is a local IP address
+func isLocalIP(ipStr string) bool {
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+
+	// Check loopback
+	if ip.IsLoopback() {
+		return true
+	}
+
+	// Get all local interfaces
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return false
+	}
+
+	for _, iface := range interfaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ifaceIP net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ifaceIP = v.IP
+			case *net.IPAddr:
+				ifaceIP = v.IP
+			}
+			if ifaceIP != nil && ifaceIP.Equal(ip) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// execLocal executes a command locally without SSH
+func (e *Executor) execLocal(cmd string, input string, timeout time.Duration) (*dispatchssh.ExecResult, error) {
+	e.logger.Debug("executing locally: %s", cmd)
+
+	// Parse command into shell and args
+	shell := "/bin/bash"
+	if e.inv.GetConfig().Exec.Shell != "" {
+		shell = e.inv.GetConfig().Exec.Shell
+	}
+
+	localCmd := exec.Command(shell, "-c", cmd)
+
+	// Set up buffers
+	var stdoutBuf, stderrBuf strings.Builder
+	localCmd.Stdout = &stdoutBuf
+	localCmd.Stderr = &stderrBuf
+
+	// Set input if provided
+	if input != "" {
+		localCmd.Stdin = strings.NewReader(input)
+	}
+
+	// Set timeout
+	if timeout > 0 {
+		timer := time.AfterFunc(timeout, func() {
+			localCmd.Process.Kill()
+		})
+		defer timer.Stop()
+	}
+
+	err := localCmd.Run()
+
+	exitCode := 0
+	if err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode = exitError.ExitCode()
+		}
+	}
+
+	return &dispatchssh.ExecResult{
+		Output:   []byte(stdoutBuf.String()),
+		Error:    []byte(stderrBuf.String()),
+		ExitCode: exitCode,
+	}, nil
 }
 
 // buildCommand builds complete command

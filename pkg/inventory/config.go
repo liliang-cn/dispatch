@@ -80,9 +80,9 @@ func New(configPath string) (*Inventory, error) {
 	inv := &Inventory{
 		config: &Config{
 			SSH: SSHConfig{
-				User:           "root",
+				User:           "", // Empty means use current system user
 				Port:           22,
-				KeyPath:        "~/.ssh/id_rsa",
+				KeyPath:        "", // Empty means try default key locations
 				Timeout:        "30s",
 				KnownHostsPath: "~/.ssh/known_hosts",
 				StrictHostKey:  false, // Default to auto-add mode for compatibility

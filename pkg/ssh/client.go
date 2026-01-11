@@ -149,7 +149,7 @@ func NewClient(keyPath string, opts ...ClientOption) (*Client, error) {
 
 	return &Client{
 		config: &ssh.ClientConfig{
-			User:            "root",
+			User:            "", // Empty means use current system user
 			Auth:            authMethods,
 			HostKeyCallback: hostKeyCallback,
 			Timeout:         30 * time.Second,
@@ -547,7 +547,25 @@ func (c *Client) Connect(spec HostSpec) (*ssh.Client, error) {
 	spec = applySSHConfig(spec)
 
 	config := *c.config // Copy config
+
+	// Set user - use current system user if empty
+	if spec.User == "" {
+		spec.User = os.Getenv("USER")
+		if spec.User == "" {
+			spec.User = "root"
+		}
+	}
+
 	config.User = spec.User
+
+	// Determine which key path to use for this host
+	keyPath := c.keyPath
+	if spec.KeyPath != "" {
+		keyPath = spec.KeyPath
+	}
+
+	// Rebuild auth methods for this specific host's key path
+	config.Auth = buildAuthMethods(keyPath)
 
 	if spec.Port == 0 {
 		spec.Port = 22

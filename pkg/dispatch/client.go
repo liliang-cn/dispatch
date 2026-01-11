@@ -150,7 +150,8 @@ func (d *Dispatch) Exec(ctx context.Context, hosts []string, cmd string, opts ..
 			Output:    r.Output,
 			Error:     r.Error,
 			ExitCode:  r.ExitCode,
-			Success:   r.ExitCode == 0,
+			ErrorMsg:  r.Err,
+			Success:   r.ExitCode == 0 && r.Err == nil,
 			Duration:  r.EndTime.Sub(r.StartTime),
 			StartTime: r.StartTime,
 			EndTime:   r.EndTime,
@@ -240,7 +241,9 @@ type HostResult struct {
 	Error []byte
 	// ExitCode is the exit status of the command.
 	ExitCode int
-	// Success is true if ExitCode is 0.
+	// ErrorMsg contains any internal error (like connection failure).
+	ErrorMsg error
+	// Success is true if ExitCode is 0 and ErrorMsg is nil.
 	Success bool
 	// Duration is how long the command took to execute.
 	Duration time.Duration
