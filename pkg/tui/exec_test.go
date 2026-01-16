@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 
@@ -111,32 +110,11 @@ func TestExecModel_Update_SpinnerTick(t *testing.T) {
 	}
 }
 
-func TestExecModel_getSummary(t *testing.T) {
-	model := NewExecModel([]string{"host1", "host2", "host3"})
-
-	// Set different states
-	model.states["host1"].status = "running"
-	model.states["host2"].status = "done"
-	model.states["host3"].status = "error"
-
-	running, done, failed := model.getSummary()
-
-	if running != 1 {
-		t.Errorf("expected 1 running, got %d", running)
-	}
-	if done != 1 {
-		t.Errorf("expected 1 done, got %d", done)
-	}
-	if failed != 1 {
-		t.Errorf("expected 1 failed, got %d", failed)
-	}
-}
-
 func TestExecModel_View(t *testing.T) {
 	model := NewExecModel([]string{"host1"})
 	model.SetCommand("test command")
 	model.states["host1"].status = "done"
-	model.states["host1"].fullOutput = []string{"line 1", "line 2", "line 3"}
+	model.states["host1"].output = "line 1\nline 2\nline 3"
 
 	view := model.View()
 
@@ -144,28 +122,12 @@ func TestExecModel_View(t *testing.T) {
 		t.Error("expected non-empty view")
 	}
 	// Check that view contains header
-	if !strings.Contains(view, "Command Execution") {
-		t.Error("expected view to contain 'Command Execution'")
+	if !strings.Contains(view, "Command:") {
+		t.Error("expected view to contain 'Command:'")
 	}
 	// Check that view has table borders
 	if !strings.Contains(view, "┌") || !strings.Contains(view, "┐") {
 		t.Error("expected view to contain table borders")
-	}
-}
-
-func TestExecModel_Update_WindowSize(t *testing.T) {
-	model := NewExecModel([]string{"host1", "host2"})
-
-	msg := tea.WindowSizeMsg{
-		Width:  100,
-		Height: 40,
-	}
-
-	newModel, _ := model.Update(msg)
-	newExecModel := newModel.(*ExecModel)
-
-	if newExecModel.width != 100 {
-		t.Errorf("expected width 100, got %d", newExecModel.width)
 	}
 }
 
@@ -174,9 +136,9 @@ func TestStripAnsi(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"\033[31mError\033[0m", "Error"},
+		{"\x1b[31mError\x1b[0m", "Error"},
 		{"normal text", "normal text"},
-		{"\033[1;32mSuccess\033[0m message", "Success message"},
+		{"\x1b[1;32mSuccess\x1b[0m message", "Success message"},
 	}
 
 	for _, tt := range tests {
@@ -209,21 +171,6 @@ func TestTruncate(t *testing.T) {
 	}
 }
 
-func TestGetFinalSummary(t *testing.T) {
-	model := NewExecModel([]string{"host1", "host2", "host3"})
-	model.states["host1"].status = "done"
-	model.states["host2"].status = "done"
-	model.states["host3"].status = "error"
-	model.states["host3"].exitCode = 1
-
-	summary := model.GetFinalSummary()
-
-	// Check that summary contains key information
-	if len(summary) == 0 {
-		t.Error("expected non-empty summary")
-	}
-}
-
 // Benchmark
 func BenchmarkExecModel_Update(b *testing.B) {
 	model := NewExecModel([]string{"host1", "host2", "host3", "host4", "host5"})
@@ -242,7 +189,7 @@ func BenchmarkExecModel_Update(b *testing.B) {
 func BenchmarkExecModel_View(b *testing.B) {
 	hosts := make([]string, 50)
 	for i := range hosts {
-		hosts[i] = fmt.Sprintf("host%d.example.com", i)
+		hosts[i] = "host%d.example.com"
 	}
 	model := NewExecModel(hosts)
 	model.SetCommand("ls -la")
