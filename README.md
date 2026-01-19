@@ -4,6 +4,8 @@ A simple SSH batch operation tool for executing commands and managing files acro
 
 > Ansible too complex? Just need to run commands and copy files to multiple machines? Use dispatch.
 
+[English](README.md) | [中文](README_CN.md)
+
 ## Features
 
 - **Batch Command Execution** - Execute shell commands on multiple hosts simultaneously
