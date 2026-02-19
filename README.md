@@ -19,7 +19,6 @@ A simple SSH batch operation tool for executing commands and managing files acro
 - **Host Groups** - Organize hosts into groups for batch operations
 - **Parallel Execution** - Configurable concurrency control
 - **Colored Logging** - Debug, info, warn, error levels with optional timestamps
-- **gRPC Server** - Run as a service for programmatic access
 
 ## Installation
 
@@ -393,50 +392,19 @@ readResult, _ := client.Read(ctx, []string{"web"}, "/var/log/app.log",
 )
 ```
 
-## gRPC Server
-
-dispatch can run as a gRPC server for programmatic access:
-
-```bash
-# Start server
-dispatch-server --port 50051
-
-# Or build and run
-make build
-./bin/dispatch-server --port 50051
-```
-
-### gRPC API
-
-| Method | Description |
-|--------|-------------|
-| `Exec` | Stream command execution results |
-| `Copy` | Stream file copy progress |
-| `Fetch` | Stream file fetch results |
-| `Stats` | Get file stats (size, mode, owner, etc.) |
-| `Read` | Read text file content from remote hosts |
-| `Hosts` | List configured hosts and groups |
-| `ListJobs` | List all jobs with status |
-| `GetJob` | Get job details by ID |
-| `CancelJob` | Cancel a running job |
-
 ## Project Structure
 
 ```
 dispatch/
 ├── cmd/
-│   ├── dispatch/          # CLI application
-│   └── dispatch-server/   # gRPC server
+│   └── dispatch/          # CLI application
 ├── pkg/
 │   ├── dispatch/          # High-level client API
 │   ├── executor/          # Parallel execution engine
 │   ├── inventory/         # TOML configuration & host management
 │   ├── logger/            # Colored logging
-│   ├── server/            # gRPC server implementation
 │   ├── ssh/               # SSH client with host key verification
 │   └── tui/               # Terminal UI components
-├── proto/
-│   └── dispatch.proto     # gRPC service definition
 └── config/
     └── example.toml       # Example configuration
 ```
@@ -448,7 +416,7 @@ dispatch/
 | Learning curve | Steep | Gentle |
 | Config format | YAML Playbooks | TOML |
 | Execution | Modules | Direct commands |
-| Integration | CLI/Python | Go library/CLI/gRPC |
+| Integration | CLI/Python | Go library/CLI |
 | Best for | Full automation | Daily ops/Go integration |
 | Real-time output | Limited | Yes (TUI mode) |
 | Host key verification | Yes | Yes (known_hosts) |

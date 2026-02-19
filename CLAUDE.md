@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-dispatch is a simple SSH batch operation tool written in Go that executes commands, copies files, and fetches files from multiple remote servers in parallel. It can be used as a CLI tool, Go library, or gRPC server.
+dispatch is a simple SSH batch operation tool written in Go that executes commands, copies files, and fetches files from multiple remote servers in parallel. It can be used as a CLI tool or Go library.
 
 ## Build and Development
 
@@ -14,14 +14,8 @@ dispatch is a simple SSH batch operation tool written in Go that executes comman
 ### Build Commands
 
 ```bash
-# Build all (CLI + server) to bin/
+# Build CLI to bin/
 make build
-
-# Build only CLI
-make cli
-
-# Build only server
-make server
 
 # Clean build artifacts
 make clean
@@ -29,22 +23,8 @@ make clean
 # Run tests
 make test
 
-# Regenerate protobuf code
-make proto
-
 # Install CLI tool globally
 go install github.com/liliang-cn/dispatch/cmd/dispatch@latest
-
-# Install gRPC server globally
-go install github.com/liliang-cn/dispatch/cmd/dispatch-server@latest
-```
-
-### gRPC Code Generation
-The proto file is at `proto/dispatch.proto`. To regenerate Go code from proto:
-```bash
-make proto
-# or
-protoc --go_out=. --go-grpc_out=. proto/dispatch.proto
 ```
 
 ## Architecture
@@ -60,6 +40,7 @@ The codebase follows a layered architecture with clear separation of concerns:
 
 2. **Configuration Layer** (`pkg/inventory/`)
    - Parses TOML configuration from `~/.dispatch/config.toml` by default
+   - Falls back to reading `~/.ssh/config` if TOML config doesn't exist
    - Host groups with inheritance: defaults → group overrides → host overrides
    - Path expansion for `~` in key paths
 
@@ -78,20 +59,14 @@ The codebase follows a layered architecture with clear separation of concerns:
    - AutoAdd mode (default): adds new host keys automatically
    - Strict mode: rejects unknown hosts
 
-5. **Server Layer** (`pkg/server/`)
-   - gRPC server implementation with streaming responses
-   - Job-based execution with tracking (Exec, Copy, Fetch operations)
-   - Concurrent job handling with status monitoring
-
 ### Entry Points
 
 - **CLI**: `cmd/dispatch/main.go` - Uses Cobra framework, commands: exec, file (send/get/update/delete), hosts, config
-- **gRPC Server**: `cmd/dispatch-server/main.go` - Configurable port and config path
 - **Library**: `pkg/dispatch/client.go` - Public API
 
 ### Configuration File Format
 
-Located at `~/.dispatch/config.toml`:
+Located at `~/.dispatch/config.toml` (optional - dispatch reads `~/.ssh/config` by default):
 
 ```toml
 [ssh]
@@ -128,10 +103,8 @@ addresses = ["192.168.1.20"]
 ### Dependencies
 
 - `github.com/BurntSushi/toml` - TOML configuration parsing
-- `github.com/spf13/cobra` + `viper` - CLI framework
-- `github.com/charmbracelet/bubbletea` + `lipgloss` - TUI components (included but not actively used in CLI)
+- `github.com/spf13/cobra` - CLI framework
 - `golang.org/x/crypto/ssh` - SSH client
-- `google.golang.org/grpc` - gRPC framework
 
 ### CLI Commands
 
@@ -142,12 +115,3 @@ addresses = ["192.168.1.20"]
 - `dispatch file delete --path <remote> --hosts <group>` - Delete files on hosts
 - `dispatch hosts` - List configured hosts and groups
 - `dispatch config` - Open configuration file
-
-### gRPC Service
-
-Defined in `proto/dispatch.proto`:
-- `Exec` - Stream command execution
-- `Copy` - Stream file copying
-- `Fetch` - Stream file fetching
-- `Hosts` - Get host information
-- `GetJob`, `ListJobs`, `CancelJob` - Job management

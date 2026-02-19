@@ -5,7 +5,7 @@ description: SSH batch operation tool for executing commands, copying files, and
 
 # dispatch
 
-dispatch is a Go-based SSH batch operation tool that executes commands, copies files, and fetches files from multiple remote servers in parallel. It can be used as a CLI tool, Go library, or gRPC server.
+dispatch is a Go-based SSH batch operation tool that executes commands, copies files, and fetches files from multiple remote servers in parallel. It can be used as a CLI tool or Go library.
 
 ## When to Use
 
@@ -123,19 +123,6 @@ func main() {
     // Fetch file from hosts
     fetchResult, err := client.Fetch(ctx, []string{"db"}, "/var/log/postgres.log", "./logs/")
 }
-```
-
-## gRPC Server
-
-dispatch can run as a gRPC server for remote management:
-
-```bash
-# Start server
-dispatch-server --port 50051 --config ~/.dispatch/config.toml
-
-# Use grpcurl to interact
-grpcurl -plaintext localhost:50051 list
-grpcurl -plaintext localhost:50051 v1.Dispatch/Exec
 ```
 
 ## Common Patterns

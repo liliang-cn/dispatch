@@ -19,7 +19,6 @@
 - **主机分组** - 将主机组织成组进行批量操作
 - **并行执行** - 可配置的并发控制
 - **彩色日志** - Debug、info、warn、error 级别，可选时间戳
-- **gRPC 服务器** - 作为服务运行以支持程序化访问
 
 ## 安装
 
@@ -393,50 +392,19 @@ readResult, _ := client.Read(ctx, []string{"web"}, "/var/log/app.log",
 )
 ```
 
-## gRPC 服务器
-
-dispatch 可以作为 gRPC 服务器运行以支持程序化访问：
-
-```bash
-# 启动服务器
-dispatch-server --port 50051
-
-# 或构建并运行
-make build
-./bin/dispatch-server --port 50051
-```
-
-### gRPC API
-
-| 方法 | 描述 |
-|------|------|
-| `Exec` | 流式命令执行结果 |
-| `Copy` | 流式文件复制进度 |
-| `Fetch` | 流式文件获取结果 |
-| `Stats` | 获取文件信息（大小、模式、所有者等） |
-| `Read` | 读取远程主机上的文本文件内容 |
-| `Hosts` | 列出配置的主机和组 |
-| `ListJobs` | 列出所有作业及其状态 |
-| `GetJob` | 按 ID 获取作业详情 |
-| `CancelJob` | 取消正在运行的作业 |
-
 ## 项目结构
 
 ```
 dispatch/
 ├── cmd/
-│   ├── dispatch/          # CLI 应用程序
-│   └── dispatch-server/   # gRPC 服务器
+│   └── dispatch/          # CLI 应用程序
 ├── pkg/
 │   ├── dispatch/          # 高层客户端 API
 │   ├── executor/          # 并行执行引擎
 │   ├── inventory/         # TOML 配置和主机管理
 │   ├── logger/            # 彩色日志
-│   ├── server/            # gRPC 服务器实现
 │   ├── ssh/               # 带主机密钥验证的 SSH 客户端
 │   └── tui/               # 终端 UI 组件
-├── proto/
-│   └── dispatch.proto     # gRPC 服务定义
 └── config/
     └── example.toml       # 示例配置
 ```
@@ -448,7 +416,7 @@ dispatch/
 | 学习曲线 | 陡峭 | 平缓 |
 | 配置格式 | YAML Playbooks | TOML |
 | 执行 | 模块 | 直接命令 |
-| 集成 | CLI/Python | Go 库/CLI/gRPC |
+| 集成 | CLI/Python | Go 库/CLI |
 | 适用场景 | 完整自动化 | 日常运维/Go 集成 |
 | 实时输出 | 有限 | 支持（TUI 模式） |
 | 主机密钥验证 | 支持 | 支持（known_hosts） |
