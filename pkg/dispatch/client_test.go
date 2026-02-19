@@ -5,6 +5,27 @@ import (
 	"time"
 )
 
+func TestNew_NilConfig(t *testing.T) {
+	// Test that New(nil) works without any configuration
+	// It should read from ~/.ssh/config if available
+	client, err := New(nil)
+	if err != nil {
+		t.Fatalf("Failed to create client with nil config: %v", err)
+	}
+	if client == nil {
+		t.Fatal("Expected non-nil client")
+	}
+
+	// Verify defaults are applied
+	invCfg := client.inv.GetConfig()
+	if invCfg.SSH.Port != 22 {
+		t.Errorf("Expected default port 22, got %d", invCfg.SSH.Port)
+	}
+	if invCfg.Exec.Parallel != 10 {
+		t.Errorf("Expected default parallel 10, got %d", invCfg.Exec.Parallel)
+	}
+}
+
 func TestNew_Config(t *testing.T) {
 	cfg := &Config{
 		SSH: &SSHConfig{

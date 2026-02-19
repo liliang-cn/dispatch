@@ -1041,25 +1041,60 @@ func hostsCmd() *cobra.Command {
 			}
 
 			groups := inv.GetAllGroups()
+			sshHosts := inventory.GetAllSSHConfigHosts()
 
-			fmt.Println("Host Groups:")
-			fmt.Println()
-
-			for name, hosts := range groups {
-				fmt.Printf("  [%s]\n", name)
-				for _, host := range hosts {
-					fmt.Printf("    - %s\n", host)
-				}
+			// Show TOML groups
+			if len(groups) > 0 {
+				fmt.Println("Host Groups (TOML):")
 				fmt.Println()
+				for name, hosts := range groups {
+					fmt.Printf("  [%s]\n", name)
+					for _, host := range hosts {
+						fmt.Printf("    - %s\n", host)
+					}
+					fmt.Println()
+				}
 			}
 
+			// Show SSH config hosts
+			if len(sshHosts) > 0 {
+				fmt.Println("Hosts from ~/.ssh/config:")
+				fmt.Println()
+				for pattern, entry := range sshHosts {
+					fmt.Printf("  [%s]\n", pattern)
+					if entry.HostName != "" {
+						fmt.Printf("    HostName: %s\n", entry.HostName)
+					}
+					if entry.User != "" {
+						fmt.Printf("    User: %s\n", entry.User)
+					}
+					if entry.Port != 0 {
+						fmt.Printf("    Port: %d\n", entry.Port)
+					}
+					if entry.KeyPath != "" {
+						fmt.Printf("    IdentityFile: %s\n", entry.KeyPath)
+					}
+					fmt.Println()
+				}
+			}
+
+			// Show defaults
 			config := inv.GetConfig()
-			fmt.Printf("SSH Config:\n")
-			fmt.Printf("  User: %s\n", config.SSH.User)
+			fmt.Println("Default Config:")
+			fmt.Println()
+			fmt.Printf("  User: %s", config.SSH.User)
+			if config.SSH.User == "" {
+				fmt.Printf("(current user)\n")
+			} else {
+				fmt.Println()
+			}
 			fmt.Printf("  Port: %d\n", config.SSH.Port)
-			fmt.Printf("  Key: %s\n", config.SSH.KeyPath)
-			fmt.Printf("\n")
-			fmt.Printf("Exec Config:\n")
+			fmt.Printf("  Key: %s", config.SSH.KeyPath)
+			if config.SSH.KeyPath == "" {
+				fmt.Printf(" (auto-detect: ~/.ssh/id_rsa, id_ed25519, etc.)\n")
+			} else {
+				fmt.Println()
+			}
 			fmt.Printf("  Parallel: %d\n", config.Exec.Parallel)
 			fmt.Printf("  Shell: %s\n", config.Exec.Shell)
 

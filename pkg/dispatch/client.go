@@ -1,3 +1,69 @@
+// Package dispatch provides a simple SSH batch operation library for executing
+// commands, copying files, and fetching files from multiple remote servers in parallel.
+//
+// The package can be used as a Go library or as a CLI tool. It supports reading
+// host configurations from ~/.ssh/config, making it easy to use without any
+// additional configuration.
+//
+// # Configuration Priority
+//
+// Host configurations are resolved in the following order (highest to lowest):
+//
+//  1. ~/.dispatch/config.toml host-level settings
+//  2. ~/.dispatch/config.toml group-level settings
+//  3. ~/.ssh/config entries (User, Port, IdentityFile, HostName)
+//  4. Default values (current user, port 22, auto-detect SSH keys)
+//
+// # Basic Usage (No Configuration Required)
+//
+// If ~/.dispatch/config.toml does not exist, dispatch automatically reads host
+// configurations from ~/.ssh/config:
+//
+//	client, _ := dispatch.New(nil)
+//
+//	// Use host names defined in ~/.ssh/config
+//	result, _ := client.Exec(ctx, []string{"orange1", "orange2"}, "uptime")
+//
+// # Usage With Custom Configuration
+//
+//	client, _ := dispatch.New(&dispatch.Config{
+//	    ConfigPath: "/path/to/config.toml", // Optional, defaults to ~/.dispatch/config.toml
+//	})
+//
+// # Example
+//
+//	package main
+//
+//	import (
+//	    "context"
+//	    "fmt"
+//	    "time"
+//
+//	    "github.com/liliang-cn/dispatch/pkg/dispatch"
+//	)
+//
+//	func main() {
+//	    // Create client (reads from ~/.ssh/config by default)
+//	    client, err := dispatch.New(nil)
+//	    if err != nil {
+//	        panic(err)
+//	    }
+//
+//	    ctx := context.Background()
+//
+//	    // Execute command on hosts defined in ~/.ssh/config
+//	    result, err := client.Exec(ctx, []string{"orange1", "orange2"}, "uptime",
+//	        dispatch.WithTimeout(30*time.Second),
+//	        dispatch.WithParallel(5),
+//	    )
+//	    if err != nil {
+//	        panic(err)
+//	    }
+//
+//	    for host, r := range result.Hosts {
+//	        fmt.Printf("%s: %s\n", host, r.Output)
+//	    }
+//	}
 package dispatch
 
 import (
@@ -10,18 +76,30 @@ import (
 	"github.com/liliang-cn/dispatch/pkg/executor"
 )
 
-// Dispatch 是主客户端，既可以作为 CLI 使用，也可以作为库使用
+// Dispatch is the main client for SSH batch operations.
+// It can be used as a CLI tool or as a Go library.
+//
+// Create a new client with New() or NewWithInventory().
 type Dispatch struct {
 	inv      *inventory.Inventory
 	executor *executor.Executor
 	mu       sync.RWMutex
 }
 
-// Config 创建 Dispatch 客户端的配置
+// Config contains configuration options for creating a Dispatch client.
+// All fields are optional - if not specified, defaults are used.
+//
+// If ConfigPath is empty and ~/.dispatch/config.toml does not exist,
+// the client will read host configurations from ~/.ssh/config.
 type Config struct {
-	ConfigPath string           // 配置文件路径，空则使用默认
-	SSH       *SSHConfig       // SSH 默认配置
-	Exec      *ExecConfig      // 执行默认配置
+	// ConfigPath is the path to the TOML configuration file.
+	// If empty, defaults to ~/.dispatch/config.toml.
+	// If the file does not exist, ~/.ssh/config is used instead.
+	ConfigPath string
+	// SSH contains default SSH settings that override config file values.
+	SSH *SSHConfig
+	// Exec contains default execution settings that override config file values.
+	Exec *ExecConfig
 }
 
 // SSHConfig SSH 配置
@@ -39,7 +117,18 @@ type ExecConfig struct {
 	Shell    string
 }
 
-// New 创建新的 Dispatch 客户端
+// New creates a new Dispatch client.
+//
+// If cfg is nil or ConfigPath is empty, the client will:
+//  1. Try to load ~/.dispatch/config.toml (if it exists)
+//  2. Fall back to reading host configurations from ~/.ssh/config
+//
+// This means you can use dispatch without any configuration file:
+//
+//	client, _ := dispatch.New(nil)
+//	result, _ := client.Exec(ctx, []string{"myserver"}, "uptime")
+//
+// Where "myserver" is defined in your ~/.ssh/config.
 func New(cfg *Config) (*Dispatch, error) {
 	configPath := ""
 	if cfg != nil {
@@ -103,7 +192,15 @@ type ProgressInfo struct {
 	Total   int64
 }
 
-// Exec 在指定主机上执行命令
+// Exec executes a command on the specified hosts.
+//
+// The hosts parameter can contain:
+//   - Host names defined in ~/.ssh/config (e.g., "orange1")
+//   - Host group names defined in ~/.dispatch/config.toml
+//   - Direct IP addresses or hostnames
+//   - Wildcard patterns matching ~/.ssh/config entries (e.g., "orange*")
+//
+// Use functional options to configure parallelism, timeout, environment variables, etc.
 func (d *Dispatch) Exec(ctx context.Context, hosts []string, cmd string, opts ...ExecOption) (*ExecResult, error) {
 	options := &execOptions{}
 	for _, opt := range opts {
@@ -276,7 +373,10 @@ func (r *ExecResult) FailedHosts() []string {
 	return failed
 }
 
-// Copy 复制文件到远程主机
+// Copy copies a file to the specified remote hosts.
+//
+// The hosts parameter can contain host names from ~/.ssh/config, group names
+// from ~/.dispatch/config.toml, direct addresses, or wildcard patterns.
 func (d *Dispatch) Copy(ctx context.Context, hosts []string, src, dest string, opts ...CopyOption) (*CopyResult, error) {
 	options := &copyOptions{}
 	for _, opt := range opts {
@@ -396,7 +496,10 @@ type CopyHostResult struct {
 	EndTime time.Time
 }
 
-// Update 更新远程文件（仅当变更时）
+// Update updates a file on remote hosts only if the content has changed.
+//
+// The hosts parameter can contain host names from ~/.ssh/config, group names
+// from ~/.dispatch/config.toml, direct addresses, or wildcard patterns.
 func (d *Dispatch) Update(ctx context.Context, hosts []string, src, dest string, opts ...UpdateOption) (*UpdateResult, error) {
 	options := &updateOptions{}
 	for _, opt := range opts {
@@ -645,7 +748,12 @@ func (d *Dispatch) GetInventory() *inventory.Inventory {
 }
 
 // GetHosts resolves host patterns to actual host configurations.
-// Patterns can be group names defined in the config or direct host addresses.
+//
+// Patterns can be:
+//   - Host names defined in ~/.ssh/config
+//   - Group names defined in ~/.dispatch/config.toml
+//   - Direct host addresses or IP addresses
+//   - Wildcard patterns (e.g., "orange*")
 func (d *Dispatch) GetHosts(patterns []string) ([]inventory.Host, error) {
 	return d.inv.GetHosts(patterns)
 }

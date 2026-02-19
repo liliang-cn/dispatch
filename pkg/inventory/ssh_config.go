@@ -227,3 +227,24 @@ func ReloadSSHConfig() {
 	globalSSHConfig.loaded = false
 	globalSSHConfig.entries = nil
 }
+
+// GetAllSSHConfigHosts returns all host entries from SSH config
+// Returns a map of host pattern -> SSHConfigEntry
+func GetAllSSHConfigHosts() map[string]SSHConfigEntry {
+	entries, err := LoadSSHConfig()
+	if err != nil {
+		return nil
+	}
+
+	result := make(map[string]SSHConfigEntry)
+	for _, e := range entries {
+		for _, pattern := range e.HostPatterns {
+			// Skip wildcard patterns and "Host *" entries
+			if pattern == "*" || strings.Contains(pattern, "*") {
+				continue
+			}
+			result[pattern] = e
+		}
+	}
+	return result
+}

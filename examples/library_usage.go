@@ -10,14 +10,15 @@ import (
 )
 
 func main() {
-	// 示例 1: 使用默认配置
-	// 会读取 ~/.dispatch/config.toml
+	// 示例 1: 使用默认配置（推荐）
+	// 如果 ~/.dispatch/config.toml 不存在，会自动读取 ~/.ssh/config
+	// 这意味着你可以直接使用 ~/.ssh/config 中定义的主机名
 	client, err := dispatch.New(nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// 示例 2: 使用自定义配置
+	// 示例 2: 使用自定义配置文件
 	/*
 	client, err := dispatch.New(&dispatch.Config{
 		ConfigPath: "/path/to/config.toml",
@@ -40,7 +41,12 @@ func main() {
 	// ========== 示例 1: 批量执行命令 ==========
 	fmt.Println("=== 示例 1: 批量执行命令 ===")
 
-	result, err := client.Exec(ctx, []string{"web"}, "uptime",
+	// 可以使用：
+	// - ~/.ssh/config 中定义的主机名（如 "orange1", "web01"）
+	// - ~/.dispatch/config.toml 中定义的组名（如 "web"）
+	// - 通配符模式（如 "orange*"）
+	// - 直接 IP 地址
+	result, err := client.Exec(ctx, []string{"orange1"}, "uptime",
 		dispatch.WithTimeout(30*time.Second),
 		dispatch.WithParallel(5),
 	)
