@@ -30,8 +30,8 @@ test:
 proto:
 	protoc --go_out=. --go-grpc_out=. proto/dispatch.proto
 
-install-cli: cli
-	go install github.com/liliang-cn/dispatch/cmd/dispatch@latest
+install-cli:
+	install -m 755 $(CLI_BIN) /usr/local/bin/dispatch
 
-install-server: server
-	go install github.com/liliang-cn/dispatch/cmd/dispatch-server@latest
+install-server:
+	install -m 755 $(SERVER_BIN) /usr/local/bin/dispatch-server
