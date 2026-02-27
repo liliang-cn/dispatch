@@ -2,7 +2,7 @@
 
 **Project Overview**
 
-`dispatch` is a high-performance SSH batch operation tool written in Go. It allows you to execute commands and manage files across multiple servers simultaneously. It can be used as a standalone Command Line Interface (CLI), a Go library for embedding into other applications, or a gRPC server for programmatic access.
+`dispatch` is a high-performance SSH batch operation tool written in Go. It allows you to execute commands and manage files across multiple servers simultaneously. It can be used as a standalone Command Line Interface (CLI) or a Go library for embedding into other applications.
 
 **Key Features:**
 *   **Batch Execution:** Run shell commands on groups of hosts in parallel.
@@ -20,14 +20,11 @@ The project is structured into clear layers:
 
 *   **`cmd/`**: Entry points for the applications.
     *   `dispatch/`: The CLI tool.
-    *   `dispatch-server/`: The gRPC server.
 *   **`pkg/`**: Core logic libraries.
     *   `dispatch/`: Public-facing Go client API.
     *   `executor/`: The heart of the system; handles concurrency, connection caching, and task orchestration.
     *   `inventory/`: Manages host configurations, groups, and overrides (TOML parsing).
     *   `ssh/`: Low-level SSH client wrapper, handling connections, authentication, and `known_hosts` verification.
-    *   `server/`: gRPC server implementation.
-*   **`proto/`**: Protocol Buffer definitions (`dispatch.proto`) for the gRPC service.
 
 ## Building and Running
 
@@ -35,20 +32,13 @@ This project uses a `Makefile` for common tasks.
 
 ### Prerequisites
 *   Go 1.21 or later
-*   `protoc` (if regenerating gRPC code)
 
 ### Commands
 
-*   **Build All:**
+*   **Build:**
     ```bash
     make build
-    # Binaries will be placed in bin/dispatch and bin/dispatch-server
-    ```
-
-*   **Build Components:**
-    ```bash
-    make cli      # Build only CLI
-    make server   # Build only Server
+    # Binary will be placed in bin/dispatch
     ```
 
 *   **Run Tests:**
@@ -56,11 +46,6 @@ This project uses a `Makefile` for common tasks.
     make test
     # or
     go test ./...
-    ```
-
-*   **Regenerate gRPC Code:**
-    ```bash
-    make proto
     ```
 
 *   **Clean:**
@@ -93,6 +78,5 @@ addresses = ["10.0.0.1", "10.0.0.2"]
 *   **Language:** Go (Golang).
 *   **Style:** Follows standard Go idioms. Use `go fmt` before committing.
 *   **Testing:** Unit tests are located alongside source code (e.g., `executor_test.go`). The `pkg/executor` package has extensive mock-based tests for core logic.
-*   **gRPC:** Changes to the API should be made in `proto/dispatch.proto` and then regenerated using `make proto`.
 *   **Error Handling:** Use wrapped errors (`fmt.Errorf("%w", err)`) to preserve context.
 *   **Concurrency:** The `executor` uses `sync.WaitGroup` and channels to manage parallel SSH connections safely.

@@ -41,7 +41,6 @@ jobs:
         run: |
           VERSION="${{ github.ref_name }}"
           sed -i "s/Version = \"dev\"/Version = \"$VERSION\"/" cmd/dispatch/main.go
-          sed -i "s/Version = \"dev\"/Version = \"$VERSION\"/" cmd/dispatch-server/main.go
 
       - name: Build
         env:
@@ -49,12 +48,7 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p dist
-          
-          # Build CLI
           go build -ldflags "-s -w -X main.Version=${{ github.ref_name }}" -o dist/dispatch${{ matrix.ext }} ./cmd/dispatch
-          
-          # Build Server
-          go build -ldflags "-s -w -X main.Version=${{ github.ref_name }}" -o dist/dispatch-server${{ matrix.ext }} ./cmd/dispatch-server
 
       - name: Archive
         run: |
