@@ -805,6 +805,13 @@ func (e *Executor) Copy(ctx context.Context, req *CopyRequest, callback func(*Co
 		req.Mode = 0644
 	}
 
+	// Convert source path to absolute path
+	absSrc, err := filepath.Abs(req.Src)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source path: %w", err)
+	}
+	req.Src = absSrc
+
 	// Initialize connection cache for this operation
 	if err := e.beginOperation(); err != nil {
 		return err
@@ -923,6 +930,13 @@ func (e *Executor) Fetch(ctx context.Context, req *FetchRequest, callback func(*
 	if req.Parallel <= 0 {
 		req.Parallel = e.inv.GetDefaultParallel()
 	}
+
+	// Convert destination path to absolute path
+	absDest, err := filepath.Abs(req.Dest)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination path: %w", err)
+	}
+	req.Dest = absDest
 
 	// Ensure local destination directory exists
 	if err := os.MkdirAll(req.Dest, 0755); err != nil && !os.IsExist(err) {
@@ -1151,6 +1165,13 @@ func (e *Executor) Update(ctx context.Context, req *UpdateRequest, callback func
 	if req.Mode == 0 {
 		req.Mode = 0644
 	}
+
+	// Convert source path to absolute path
+	absSrc, err := filepath.Abs(req.Src)
+	if err != nil {
+		return fmt.Errorf("failed to resolve source path: %w", err)
+	}
+	req.Src = absSrc
 
 	// Initialize connection cache for this operation
 	if err := e.beginOperation(); err != nil {
