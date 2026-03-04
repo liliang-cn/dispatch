@@ -46,7 +46,7 @@ Examples:
 	rootCmd.PersistentFlags().IntVarP(&parallel, "parallel", "p", 0, "Parallel connections (default: 10)")
 	rootCmd.PersistentFlags().IntVarP(&timeout, "timeout", "t", 0, "Timeout in seconds (default: 300)")
 	rootCmd.PersistentFlags().StringVar(&logLevel, "log-level", "", "Log level: debug, info, warn, error (default: info)")
-	rootCmd.PersistentFlags().BoolVar(&noTUI, "no-tui", false, "Disable TUI mode, use text output")
+	rootCmd.PersistentFlags().BoolVar(&noTUI, "no-tui", true, "Disable TUI mode, use text output")
 
 	// Set version template
 	rootCmd.SetVersionTemplate(`{{with .Name}}{{printf "%s " .}}{{end}}{{printf "version %s" .Version}}
