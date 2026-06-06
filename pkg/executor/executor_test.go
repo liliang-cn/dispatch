@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +20,7 @@ import (
 
 // MockSSHClient implements SSHClient for testing
 type MockSSHClient struct {
-	t *testing.T
+	t            *testing.T
 	CmdResponses map[string]struct {
 		Stdout   string
 		Stderr   string
@@ -350,4 +352,62 @@ func TestFetch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+// TestConcurrentOperationLifecycle guards against the shared-executor race:
+// one operation's endOperation must not tear down the connection cache while
+// other concurrent operations are still using it (previously panicked with
+// "assignment to entry in nil map" in getConnection).
+func TestConcurrentOperationLifecycle(t *testing.T) {
+	inv, _ := inventory.New("")
+	e := NewExecutor(inv)
+	e.SetBaseClient(&nilSSHClient{})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := e.beginOperation(); err != nil {
+				t.Errorf("beginOperation: %v", err)
+				return
+			}
+			// Simulate the cache write that crashed on a nil map.
+			e.connMu.Lock()
+			if e.connCache == nil {
+				t.Error("connCache is nil during an active operation")
+			}
+			e.connMu.Unlock()
+			e.endOperation()
+		}()
+	}
+	wg.Wait()
+
+	e.connMu.Lock()
+	defer e.connMu.Unlock()
+	if e.opCount != 0 {
+		t.Errorf("opCount = %d after all operations finished, want 0", e.opCount)
+	}
+	if e.connCache != nil {
+		t.Error("connCache should be released after the last operation")
+	}
+}
+
+// nilSSHClient satisfies SSHClient without making network connections.
+type nilSSHClient struct{}
+
+func (nilSSHClient) Connect(spec dispatchssh.HostSpec) (*ssh.Client, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (nilSSHClient) Exec(spec dispatchssh.HostSpec, cmd string, input string, timeout time.Duration) (*dispatchssh.ExecResult, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (nilSSHClient) ExecStream(spec dispatchssh.HostSpec, cmd string, input string, timeout time.Duration) (io.ReadCloser, io.ReadCloser, error) {
+	return nil, nil, fmt.Errorf("not implemented")
+}
+func (nilSSHClient) Copy(spec dispatchssh.HostSpec, src, dest string, mode os.FileMode) error {
+	return fmt.Errorf("not implemented")
+}
+func (nilSSHClient) Fetch(spec dispatchssh.HostSpec, src, dest string) error {
+	return fmt.Errorf("not implemented")
 }

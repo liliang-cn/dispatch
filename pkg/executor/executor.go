@@ -3,7 +3,7 @@
 // The Executor type manages concurrent SSH connections and coordinates execution
 // across hosts with configurable parallelism and timeout handling.
 //
-// Callback Pattern
+// # Callback Pattern
 //
 // Results are delivered via callback functions as they complete, enabling
 // real-time processing without waiting for all hosts to finish.
@@ -57,9 +57,10 @@ type SSHClient interface {
 type Executor struct {
 	inv        *inventory.Inventory
 	logger     *logger.Logger
-	connCache  map[string]*clientConn // Cache for connections within a single operation
-	connMu     sync.Mutex             // Protects connCache
+	connCache  map[string]*clientConn // Cache for connections, shared by concurrent operations
+	connMu     sync.Mutex             // Protects connCache, baseClient, and opCount
 	baseClient SSHClient              // Base SSH client for creating connections
+	opCount    int                    // Active operations sharing the connection cache
 }
 
 // clientConn wraps an SSH client with metadata for connection reuse.
@@ -112,11 +113,18 @@ func (e *Executor) SetBaseClient(client SSHClient) {
 }
 
 // beginOperation initializes the connection cache for a new operation.
+// Operations are reference-counted: an Executor may be shared by concurrent
+// callers (e.g. a server handling parallel requests), and the cache must
+// only be created by the first operation and torn down by the last one.
+// Without this, one operation's endOperation nils the cache while another
+// operation is still writing to it ("assignment to entry in nil map").
 func (e *Executor) beginOperation() error {
 	e.connMu.Lock()
 	defer e.connMu.Unlock()
 
-	e.connCache = make(map[string]*clientConn)
+	if e.opCount == 0 || e.connCache == nil {
+		e.connCache = make(map[string]*clientConn)
+	}
 
 	// Create base SSH client if not already set
 	if e.baseClient == nil {
@@ -126,13 +134,22 @@ func (e *Executor) beginOperation() error {
 		}
 		e.baseClient = client
 	}
+	e.opCount++
 	return nil
 }
 
-// endOperation closes all cached connections and cleans up.
+// endOperation closes all cached connections and cleans up once the last
+// concurrent operation finishes.
 func (e *Executor) endOperation() {
 	e.connMu.Lock()
 	defer e.connMu.Unlock()
+
+	if e.opCount > 0 {
+		e.opCount--
+	}
+	if e.opCount > 0 {
+		return
+	}
 
 	for _, conn := range e.connCache {
 		conn.client.Close()
@@ -170,6 +187,12 @@ func (e *Executor) getConnection(spec dispatchssh.HostSpec) (*ssh.Client, error)
 		client.Close() // Close the duplicate connection
 		conn.refCount++
 		return conn.client, nil
+	}
+
+	// Defense in depth: never write into a nil map even if operation
+	// bookkeeping is violated by a caller.
+	if e.connCache == nil {
+		e.connCache = make(map[string]*clientConn)
 	}
 
 	// Cache the connection
@@ -285,13 +308,13 @@ func (e *Executor) copyFile(sshClient *ssh.Client, src, dest string, mode os.Fil
 		defer w.Close()
 
 		fmt.Fprintf(w, "C%04o %d %s\n", mode, size, filepath.Base(dest))
-		
+
 		// Create a writer that reports progress
 		pw := &progressWriter{
-			Writer:   w,
+			Writer:  w,
 			onWrite: progress,
 		}
-		
+
 		io.Copy(pw, f)
 		fmt.Fprint(w, "\x00")
 	}()
@@ -350,7 +373,7 @@ func (e *Executor) fetchFile(sshClient *ssh.Client, src, dest string, progress f
 
 	// Create a writer that reports progress
 	pw := &progressWriter{
-		Writer:   f,
+		Writer:  f,
 		onWrite: progress,
 	}
 
@@ -375,7 +398,7 @@ type ExecRequest struct {
 	Dir            string
 	Parallel       int
 	Timeout        time.Duration
-	Stream         bool                                            // Whether to use streaming output
+	Stream         bool                                       // Whether to use streaming output
 	StreamCallback func(host, streamType string, data []byte) // Callback for streaming output
 }
 
@@ -552,7 +575,7 @@ func (e *Executor) ExecStreamWithCallback(ctx context.Context, req *ExecRequest,
 		if len(data) == 0 {
 			return
 		}
-		
+
 		if req.StreamCallback != nil {
 			req.StreamCallback(host, typ, data)
 			return
@@ -783,11 +806,11 @@ type CopyRequest struct {
 
 // CopyResult copy result
 type CopyResult struct {
-	Host      string
+	Host        string
 	BytesCopied int64
-	StartTime  time.Time
-	EndTime    time.Time
-	Err        error
+	StartTime   time.Time
+	EndTime     time.Time
+	Err         error
 }
 
 // Copy batch copies files
@@ -912,12 +935,12 @@ type FetchRequest struct {
 
 // FetchResult download result
 type FetchResult struct {
-	Host        string
-	LocalPath   string
+	Host         string
+	LocalPath    string
 	BytesFetched int64
-	StartTime   time.Time
-	EndTime     time.Time
-	Err         error
+	StartTime    time.Time
+	EndTime      time.Time
+	Err          error
 }
 
 // Fetch batch downloads files
@@ -1441,8 +1464,8 @@ type StatsResult struct {
 	Exists    bool
 	IsDir     bool
 	Size      int64
-	Mode      int64  // File permissions (octal)
-	ModTime   int64  // Unix timestamp
+	Mode      int64 // File permissions (octal)
+	ModTime   int64 // Unix timestamp
 	Owner     string
 	Group     string
 	StartTime time.Time
@@ -1584,18 +1607,18 @@ type ReadRequest struct {
 	Hosts    []string
 	Path     string // File path to read
 	Parallel int
-	Offset   int64  // Read starting position
-	Limit    int64  // Max bytes to read (0 = all)
+	Offset   int64 // Read starting position
+	Limit    int64 // Max bytes to read (0 = all)
 }
 
 // ReadResult file read result
 type ReadResult struct {
 	Host      string
 	Path      string
-	Content   string  // File content (text only)
-	Offset    int64   // Current offset
-	IsBinary  bool    // Whether file is binary
-	TotalSize int64   // Total file size
+	Content   string // File content (text only)
+	Offset    int64  // Current offset
+	IsBinary  bool   // Whether file is binary
+	TotalSize int64  // Total file size
 	StartTime time.Time
 	EndTime   time.Time
 	Err       error
