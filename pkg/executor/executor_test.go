@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -410,4 +411,57 @@ func (nilSSHClient) Copy(spec dispatchssh.HostSpec, src, dest string, mode os.Fi
 }
 func (nilSSHClient) Fetch(spec dispatchssh.HostSpec, src, dest string) error {
 	return fmt.Errorf("not implemented")
+}
+
+func TestShellQuote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`plain`, `'plain'`},
+		{`has space`, `'has space'`},
+		{`a'b`, `'a'\''b'`},
+		{`$HOME and $(date)`, `'$HOME and $(date)'`},
+	}
+	for _, c := range cases {
+		if got := shellQuote(c.in); got != c.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// TestBuildCommandPreservesVariables guards the quoting contract: commands
+// defining and using their own shell variables must arrive at the target
+// shell verbatim. The previous double-quote wrapping let the OUTER shell
+// (the SSH login shell, or the extra local sh) expand $f to an empty string
+// before the command ran.
+func TestBuildCommandPreservesVariables(t *testing.T) {
+	inv, _ := inventory.New("")
+	e := NewExecutor(inv)
+
+	cmd := `f=/tmp/x; echo "$f"`
+	built := e.buildCommand(cmd, nil, "")
+
+	// Remote form: shell -c '<verbatim payload>' (shell comes from config)
+	if !strings.HasSuffix(built, ` -c 'f=/tmp/x; echo "$f"'`) {
+		t.Errorf("buildCommand = %q, want single-quoted verbatim payload", built)
+	}
+
+	// Round-trip through a real shell the way the remote side parses it:
+	// the output must be the variable's value, not an empty line.
+	out, err := exec.Command("/bin/sh", "-c", built).Output()
+	if err != nil {
+		t.Fatalf("shell round-trip failed: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "/tmp/x" {
+		t.Errorf("round-trip output = %q, want %q (outer shell expanded $f)", got, "/tmp/x")
+	}
+}
+
+func TestBuildShellLineEnvAndDir(t *testing.T) {
+	inv, _ := inventory.New("")
+	e := NewExecutor(inv)
+
+	line := e.buildShellLine("echo hi", map[string]string{"B": "2", "A": "it's"}, "/tmp")
+	want := `cd '/tmp' && A='it'\''s' B='2' echo hi`
+	if line != want {
+		t.Errorf("buildShellLine = %q, want %q", line, want)
+	}
 }

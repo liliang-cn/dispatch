@@ -33,6 +33,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -470,12 +471,17 @@ func (e *Executor) Exec(ctx context.Context, req *ExecRequest, callback ExecResu
 				StartTime: time.Now(),
 			}
 
+			// Local execution already runs the line through exactly one
+			// shell (exec.Command(shell, "-c", line)); wrapping it in a
+			// second `sh -c "..."` made that first shell pre-expand
+			// $variables inside the command. Only the remote path needs
+			// the quoted wrapper, because SSH inserts a login shell.
 			cmd := e.buildCommand(req.Cmd, req.Env, req.Dir)
 
 			// Check if this is a local host - execute directly without SSH
 			if isLocalHost(h.Address) {
 				e.logger.Debug("executing locally on %s", h.Address)
-				localResult, err := e.execLocal(cmd, req.Input, req.Timeout)
+				localResult, err := e.execLocal(e.buildShellLine(req.Cmd, req.Env, req.Dir), req.Input, req.Timeout)
 				result.EndTime = time.Now()
 
 				if err != nil {
@@ -1422,30 +1428,53 @@ func (e *Executor) execLocal(cmd string, input string, timeout time.Duration) (*
 	}, nil
 }
 
-// buildCommand builds complete command
-func (e *Executor) buildCommand(cmd string, env map[string]string, dir string) string {
+// shellQuote wraps s in single quotes for safe transport through another
+// shell, escaping embedded single quotes as '\”. Unlike double quotes,
+// single quotes prevent the outer shell from expanding $variables, command
+// substitutions and backslashes, so the payload arrives verbatim.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// buildShellLine assembles the working-directory prefix, environment
+// variables and the command into one shell line, without wrapping it in an
+// extra shell invocation.
+func (e *Executor) buildShellLine(cmd string, env map[string]string, dir string) string {
 	fullCmd := ""
 
 	// Set working directory
 	if dir != "" {
-		fullCmd = fmt.Sprintf("cd %s && ", dir)
+		fullCmd = fmt.Sprintf("cd %s && ", shellQuote(dir))
 	}
 
-	// Set environment variables
-	for k, v := range env {
-		fullCmd += fmt.Sprintf("%s='%s' ", k, v)
+	// Set environment variables (sorted for deterministic output)
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		fullCmd += fmt.Sprintf("%s=%s ", k, shellQuote(env[k]))
 	}
 
 	// Add command
 	fullCmd += cmd
 
-	// Use shell to execute
+	return fullCmd
+}
+
+// buildCommand builds the complete command for execution on a REMOTE host,
+// where the SSH server hands the string to the login shell for parsing
+// before our chosen shell ever sees it. The payload is therefore
+// single-quoted: with the previous double-quote wrapping, that first shell
+// expanded $variables and command substitutions inside the user's command —
+// silently emptying $vars the command defined for itself.
+func (e *Executor) buildCommand(cmd string, env map[string]string, dir string) string {
 	shell := e.inv.GetConfig().Exec.Shell
 	if shell == "" {
 		shell = "/bin/sh"
 	}
-
-	return fmt.Sprintf("%s -c \"%s\"", shell, fullCmd)
+	return fmt.Sprintf("%s -c %s", shell, shellQuote(e.buildShellLine(cmd, env, dir)))
 }
 
 // ========== Stats ==========
