@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -25,8 +26,11 @@ var (
 type KnownHostsVerifier struct {
 	knownHostsPath string
 	hostKeys       map[string][]ssh.PublicKey // Map of host patterns to keys
-	autoAdd        bool                        // Automatically add unknown host keys
+	autoAdd        bool                       // Automatically add unknown host keys
 	mu             sync.RWMutex
+	// loadedMod is the known_hosts modification time load() last read, so a
+	// file edited since can be picked up. See reloadIfChanged.
+	loadedMod time.Time
 }
 
 // NewKnownHostsVerifier creates a verifier from known_hosts file.
@@ -66,6 +70,9 @@ func (v *KnownHostsVerifier) load() error {
 	defer f.Close()
 
 	v.hostKeys = make(map[string][]ssh.PublicKey)
+	if st, err := f.Stat(); err == nil {
+		v.loadedMod = st.ModTime()
+	}
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -151,6 +158,20 @@ func (v *KnownHostsVerifier) Verify(hostname string, remote net.Addr, key ssh.Pu
 		return err
 	}
 
+	// A key that does not match may be one the operator has just fixed in
+	// the file. The file was read once, at construction, so without this a
+	// corrected known_hosts had no effect until the process restarted — and
+	// every connection to that host kept failing as "host key changed" in the
+	// meantime.
+	if !(hasMatch && matched) && v.reloadIfChanged() {
+		v.mu.RLock()
+		matched, hasMatch, err = v.findMatchingKey(host, key)
+		v.mu.RUnlock()
+		if err != nil {
+			return err
+		}
+	}
+
 	if hasMatch && matched {
 		return nil // Key matches known_hosts
 	}
@@ -167,6 +188,22 @@ func (v *KnownHostsVerifier) Verify(hostname string, remote net.Addr, key ssh.Pu
 	// Auto-add mode: add the key to known_hosts
 	// Note: We must release RLock before calling Add which needs Lock
 	return v.Add(host, key)
+}
+
+// reloadIfChanged re-reads known_hosts when it was modified after the last
+// load, reporting whether it did.
+func (v *KnownHostsVerifier) reloadIfChanged() bool {
+	st, err := os.Stat(v.knownHostsPath)
+	if err != nil {
+		return false
+	}
+	v.mu.RLock()
+	stale := st.ModTime().After(v.loadedMod)
+	v.mu.RUnlock()
+	if !stale {
+		return false
+	}
+	return v.load() == nil
 }
 
 // findMatchingKey searches for a matching key in known_hosts.
