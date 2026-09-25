@@ -8,7 +8,7 @@
 //   - Command execution with output capture
 //   - File upload (copy) and download (fetch)
 //
-// Host Specification
+// # Host Specification
 //
 // Hosts are specified using HostSpec, which defines connection parameters:
 //   - Address: The host address (hostname or IP)
@@ -17,11 +17,11 @@
 //   - KeyPath: Path to private key file
 //
 // Configuration Priority (highest to lowest):
-//   1. Explicitly set values (UserSet, PortSet, KeyPathSet)
-//   2. Host-specific overrides in TOML config
-//   3. Group-level overrides in TOML config
-//   4. ~/.ssh/config file entries
-//   5. Default values
+//  1. Explicitly set values (UserSet, PortSet, KeyPathSet)
+//  2. Host-specific overrides in TOML config
+//  3. Group-level overrides in TOML config
+//  4. ~/.ssh/config file entries
+//  5. Default values
 //
 // Example Usage:
 //
@@ -67,6 +67,10 @@ type Client struct {
 	config *ssh.ClientConfig
 	// keyPath stores the path to the private key file.
 	keyPath string
+	// verifier is the known_hosts behind config.HostKeyCallback, or nil when
+	// host keys are not verified. Connect asks it which key types a host is
+	// known by.
+	verifier *KnownHostsVerifier
 }
 
 // HostSpec defines the parameters for connecting to a remote host.
@@ -142,7 +146,7 @@ func NewClient(keyPath string, opts ...ClientOption) (*Client, error) {
 	authMethods := buildAuthMethods(expandedKeyPath)
 
 	// Build host key callback
-	hostKeyCallback, err := buildHostKeyCallback(cfg.knownHostsPath, cfg.strictHostKey)
+	hostKeyCallback, verifier, err := buildHostKeyCallback(cfg.knownHostsPath, cfg.strictHostKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create host key callback: %w", err)
 	}
@@ -154,21 +158,22 @@ func NewClient(keyPath string, opts ...ClientOption) (*Client, error) {
 			HostKeyCallback: hostKeyCallback,
 			Timeout:         30 * time.Second,
 		},
-		keyPath: expandedKeyPath,
+		keyPath:  expandedKeyPath,
+		verifier: verifier,
 	}, nil
 }
 
 // buildHostKeyCallback creates the host key callback based on configuration.
-func buildHostKeyCallback(knownHostsPath string, strictHostKey bool) (ssh.HostKeyCallback, error) {
+func buildHostKeyCallback(knownHostsPath string, strictHostKey bool) (ssh.HostKeyCallback, *KnownHostsVerifier, error) {
 	// autoAdd is true when strict mode is disabled
 	autoAdd := !strictHostKey
 	verifier, err := NewKnownHostsVerifier(knownHostsPath, autoAdd)
 	if err != nil {
 		// If we can't create verifier, fall back to insecure callback for compatibility
 		// This should not happen in normal operation
-		return ssh.InsecureIgnoreHostKey(), nil
+		return ssh.InsecureIgnoreHostKey(), nil, nil
 	}
-	return verifier.HostKeyCallback(), nil
+	return verifier.HostKeyCallback(), verifier, nil
 }
 
 // buildAuthMethods builds authentication method list with fallback support
@@ -229,7 +234,7 @@ func NewClientWithPassword(user, password string, opts ...ClientOption) (*Client
 	}
 
 	// Build host key callback
-	hostKeyCallback, err := buildHostKeyCallback(cfg.knownHostsPath, cfg.strictHostKey)
+	hostKeyCallback, verifier, err := buildHostKeyCallback(cfg.knownHostsPath, cfg.strictHostKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create host key callback: %w", err)
 	}
@@ -241,6 +246,7 @@ func NewClientWithPassword(user, password string, opts ...ClientOption) (*Client
 			HostKeyCallback: hostKeyCallback,
 			Timeout:         30 * time.Second,
 		},
+		verifier: verifier,
 	}, nil
 }
 
@@ -337,12 +343,12 @@ func resolveHost(host string) (string, error) {
 
 // SSHConfigEntry represents a Host entry in SSH config file
 type SSHConfigEntry struct {
-	Patterns   []string
-	HostName   string
-	User       string
-	Port       int
-	KeyPath    string
-	ProxyJump  string
+	Patterns     []string
+	HostName     string
+	User         string
+	Port         int
+	KeyPath      string
+	ProxyJump    string
 	ProxyCommand string
 }
 
@@ -575,6 +581,17 @@ func (c *Client) Connect(spec HostSpec) (*ssh.Client, error) {
 	hostAddr, err := resolveHost(spec.Address)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve host %s: %w", spec.Address, err)
+	}
+
+	// Negotiate only the host key types known_hosts holds for this host, as
+	// OpenSSH does. Otherwise a host with several host keys may offer one of a
+	// type that was never recorded, and it is compared against the one that
+	// was — every connection then fails as "host key changed" although the
+	// recorded key is perfectly valid.
+	if c.verifier != nil {
+		if algs := c.verifier.HostKeyAlgorithms(hostAddr, spec.Address); len(algs) > 0 {
+			config.HostKeyAlgorithms = algs
+		}
 	}
 
 	addr := fmt.Sprintf("%s:%d", hostAddr, spec.Port)

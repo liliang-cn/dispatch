@@ -3,6 +3,7 @@ package ssh
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/rsa"
 	"net"
 	"os"
 	"testing"
@@ -94,4 +95,46 @@ func TestKnownHostsVerifierPicksUpAFixedFile(t *testing.T) {
 	if err := v.Verify("10.0.0.3", addr, oldKey); err == nil {
 		t.Fatal("the replaced key is still accepted")
 	}
+}
+
+// A host known by its ed25519 key is asked for that key only. Left to the
+// defaults, a host with several host keys could present its ECDSA key, which
+// then did not match the recorded ed25519 one and read as "host key changed".
+func TestHostKeyAlgorithmsFollowTheRecordedKeyTypes(t *testing.T) {
+	path := t.TempDir() + "/known_hosts"
+	edPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	edKey, _ := ssh.NewPublicKey(edPub)
+	rsaKey := mustRSAKey(t)
+	content := "10.0.0.3 " + string(ssh.MarshalAuthorizedKey(edKey)) +
+		"sdt4 " + string(ssh.MarshalAuthorizedKey(rsaKey))
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v, err := NewKnownHostsVerifier(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.HostKeyAlgorithms("10.0.0.3", "sdt3"); len(got) != 1 || got[0] != ssh.KeyAlgoED25519 {
+		t.Errorf("10.0.0.3 = %v, want only %s", got, ssh.KeyAlgoED25519)
+	}
+	got := v.HostKeyAlgorithms("10.0.0.4", "sdt4")
+	if len(got) == 0 || got[0] != ssh.KeyAlgoRSASHA512 {
+		t.Errorf("an RSA host key must be negotiated with SHA-2 first: %v", got)
+	}
+	if got := v.HostKeyAlgorithms("10.0.0.9"); got != nil {
+		t.Errorf("an unknown host must keep the defaults, got %v", got)
+	}
+}
+
+func mustRSAKey(t *testing.T) ssh.PublicKey {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := ssh.NewPublicKey(&k.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pub
 }

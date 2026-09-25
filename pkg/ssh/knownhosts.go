@@ -190,6 +190,46 @@ func (v *KnownHostsVerifier) Verify(hostname string, remote net.Addr, key ssh.Pu
 	return v.Add(host, key)
 }
 
+// HostKeyAlgorithms lists the host key algorithms that can present a key
+// known_hosts records for any of hosts, or nil when none of them is known.
+func (v *KnownHostsVerifier) HostKeyAlgorithms(hosts ...string) []string {
+	v.reloadIfChanged()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+	seen := map[string]bool{}
+	var algs []string
+	add := func(a string) {
+		if !seen[a] {
+			seen[a] = true
+			algs = append(algs, a)
+		}
+	}
+	for pattern, keys := range v.hostKeys {
+		matched := false
+		for _, h := range hosts {
+			if h != "" && matchHostPattern(h, pattern) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		for _, k := range keys {
+			switch t := k.Type(); t {
+			case ssh.KeyAlgoRSA:
+				// An RSA key is presented under SHA-2 signature algorithms.
+				add(ssh.KeyAlgoRSASHA512)
+				add(ssh.KeyAlgoRSASHA256)
+				add(ssh.KeyAlgoRSA)
+			default:
+				add(t)
+			}
+		}
+	}
+	return algs
+}
+
 // reloadIfChanged re-reads known_hosts when it was modified after the last
 // load, reporting whether it did.
 func (v *KnownHostsVerifier) reloadIfChanged() bool {
