@@ -423,4 +423,4 @@ dispatch/
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).
