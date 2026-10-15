@@ -465,3 +465,67 @@ func TestBuildShellLineEnvAndDir(t *testing.T) {
 		t.Errorf("buildShellLine = %q, want %q", line, want)
 	}
 }
+
+// countingSSHClient counts how often a connection is dialled.
+type countingSSHClient struct {
+	*MockSSHClient
+	mu       sync.Mutex
+	connects int
+}
+
+func (c *countingSSHClient) Connect(spec dispatchssh.HostSpec) (*ssh.Client, error) {
+	c.mu.Lock()
+	c.connects++
+	c.mu.Unlock()
+	return c.MockSSHClient.Connect(spec)
+}
+
+// A cached connection that has died (the host rebooted) is replaced, not
+// handed out again for every later command while other operations keep the
+// cache alive.
+func TestExec_ReplacesDeadCachedConnection(t *testing.T) {
+	inv, _ := inventory.New("")
+	e := NewExecutor(inv)
+	mock := &countingSSHClient{MockSSHClient: &MockSSHClient{t: t, CmdResponses: map[string]struct {
+		Stdout   string
+		Stderr   string
+		ExitCode int
+	}{"echo hi": {Stdout: "hi\n"}}}}
+	e.SetBaseClient(mock)
+
+	// Another operation running throughout keeps the cache from being torn
+	// down between the two commands, as on a busy caller.
+	if err := e.beginOperation(); err != nil {
+		t.Fatal(err)
+	}
+	defer e.endOperation()
+
+	run := func() (string, error) {
+		var out string
+		var runErr error
+		err := e.Exec(context.Background(), &ExecRequest{Hosts: []string{"testhost"}, Cmd: "echo hi"}, func(r *ExecResult) {
+			out, runErr = string(r.Output), r.Err
+		})
+		if err != nil {
+			return "", err
+		}
+		return out, runErr
+	}
+	if out, err := run(); err != nil || out != "hi\n" {
+		t.Fatalf("first run: %q, %v", out, err)
+	}
+
+	e.connMu.Lock()
+	for _, c := range e.connCache {
+		c.client.Close()
+	}
+	e.connMu.Unlock()
+
+	out, err := run()
+	if err != nil || out != "hi\n" {
+		t.Fatalf("after the connection died: %q, %v", out, err)
+	}
+	if mock.connects != 2 {
+		t.Errorf("connects = %d, want 2 (one redial)", mock.connects)
+	}
+}

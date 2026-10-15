@@ -169,10 +169,26 @@ func (e *Executor) getConnection(spec dispatchssh.HostSpec) (*ssh.Client, error)
 	// Check if we have a cached connection
 	if conn, ok := e.connCache[key]; ok {
 		conn.refCount++
+		cached := conn.client
 		e.connMu.Unlock()
-		return conn.client, nil
+		if connAlive(cached, cachedConnProbeTimeout) {
+			return cached, nil
+		}
+		// The cache lives as long as any operation is running, which on a
+		// busy caller is indefinitely, so a connection to a host that
+		// rebooted or lost power stayed in it and every later command on
+		// that host failed with "failed to create session". Drop it and dial
+		// again.
+		e.logger.Debug("cached connection to %s is dead, reconnecting", key)
+		e.connMu.Lock()
+		if cur, ok := e.connCache[key]; ok && cur.client == cached {
+			delete(e.connCache, key)
+		}
+		e.connMu.Unlock()
+		cached.Close()
+	} else {
+		e.connMu.Unlock()
 	}
-	e.connMu.Unlock()
 
 	// Create new connection (slow operation, done without lock)
 	client, err := e.baseClient.Connect(spec)
@@ -203,6 +219,28 @@ func (e *Executor) getConnection(spec dispatchssh.HostSpec) (*ssh.Client, error)
 	}
 
 	return client, nil
+}
+
+// cachedConnProbeTimeout bounds the liveness check of a cached connection. A
+// live one answers within a round trip; a host that lost power never does.
+const cachedConnProbeTimeout = 3 * time.Second
+
+// connAlive reports whether c still reaches its server, by sending a global
+// keepalive request. Servers answer it, if only to refuse it; a closed or reset
+// connection fails at once, and one to a host that is gone gets no answer
+// within timeout.
+func connAlive(c *ssh.Client, timeout time.Duration) bool {
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := c.SendRequest("keepalive@openssh.com", true, nil)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		return err == nil
+	case <-time.After(timeout):
+		return false
+	}
 }
 
 // execOnConn executes a command on an existing SSH connection.
